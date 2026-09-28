@@ -1,0 +1,75 @@
+name: CI
+
+# Runs on GitHub's free runners for public repositories.
+#
+# Each step guards a promise the site makes:
+# - the registry check (in the build and the tests) keeps privacy labels honest;
+# - check:privacy keeps network, storage and eval out of the source;
+# - the static export proves there is no server to pay for;
+# - check:bundle keeps each tool's engine out of every other tool's page;
+# - the browser test proves the CSP lets the app run, every tool gives a correct
+#   result, the heavy tools use a worker, and nothing leaves the site's origin.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Lint, test, build and browser check
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Formatting
+        run: npm run format:check
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Privacy check
+        run: npm run check:privacy
+
+      - name: Static export (proves every route is static)
+        run: npm run build:static
+
+      - name: Bundle check
+        run: npm run check:bundle
+
+      # Uses the Chrome preinstalled on GitHub's Ubuntu runners; nothing is downloaded.
+      - name: Browser smoke test
+        run: npm run test:browser -- --report browser-report.txt
+
+      - name: Upload browser report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: browser-report
+          path: browser-report.txt
+          if-no-files-found: ignore
