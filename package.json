@@ -1,0 +1,43 @@
+{
+  "name": "everything-free-tools",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Everything.Free Tools by Quilonix: free browser tools. No account. Local processing wherever possible.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "build:static": "node scripts/build-static.mjs",
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./scripts/test/register.mjs --test \"tests/**/*.test.mts\"",
+    "check:privacy": "node scripts/check-privacy.mjs",
+    "check:bundle": "node scripts/check-bundle.mjs",
+    "test:browser": "node scripts/browser-smoke.mjs",
+    "verify": "npm run lint && npm run typecheck && npm run format:check && npm test && npm run check:privacy && npm run build",
+    "verify:static": "npm run lint && npm run typecheck && npm run format:check && npm test && npm run check:privacy && npm run build:static && npm run check:bundle"
+  },
+  "dependencies": {
+    "next": "16.3.6",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "uqr": "0.1.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "4.3.3",
+    "@types/node": "20.19.43",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "axe-core": "4.13.0",
+    "eslint": "9.39.5",
+    "eslint-config-next": "16.3.6",
+    "prettier": "3.9.9",
+    "tailwindcss": "4.3.3",
+    "typescript": "5.9.3"
+  }
+}
