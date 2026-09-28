@@ -1,0 +1,184 @@
+@import "tailwindcss";
+
+/*
+ * Everything.Free Tools design tokens
+ * ---------------------------------------------------------------------------
+ * Colour is only ever referenced through semantic tokens (bg, surface, fg,
+ * border, accent, status), never raw hex in components. Dark values live on
+ * :root so the site renders correctly before and without JavaScript. A light
+ * theme is a token swap under `.light`; it is defined but not exposed yet.
+ *
+ * Gold is an accent: focus rings, the primary action, small highlights. It is
+ * never a surface colour.
+ */
+
+@custom-variant dark (&:where(:root:not(.light), .dark, .dark *));
+
+:root {
+  color-scheme: dark;
+
+  --bg: #0a0a0f;
+  --bg-subtle: #0d1117;
+  --surface: #111318;
+  --surface-raised: #171a20;
+  --surface-hover: #1d2129;
+
+  --border: #242833;
+  --border-strong: #353b48;
+
+  --fg: #f5f2e8;
+  /* 9.7:1 on --bg. */
+  --fg-muted: #b3b0a6;
+  /* 5.6:1 on --bg: still AA for body text, used for secondary metadata. */
+  --fg-subtle: #8c8a82;
+
+  --accent: #d4af37;
+  --accent-hover: #e2c158;
+  --accent-fg: #0a0a0f;
+  --accent-soft: rgb(212 175 55 / 0.12);
+
+  --slate: #334155;
+
+  --success: #0faf78;
+  --success-fg: #41d6a2;
+  --success-soft: rgb(15 175 120 / 0.12);
+
+  --warning: #d99a00;
+  --warning-fg: #f0b93a;
+  --warning-soft: rgb(217 154 0 / 0.12);
+
+  --danger: #b42318;
+  --danger-fg: #f6877d;
+  --danger-soft: rgb(180 35 24 / 0.16);
+
+  --shadow-raised: 0 12px 32px -12px rgb(0 0 0 / 0.7);
+  --radius: 0.625rem;
+}
+
+.light {
+  color-scheme: light;
+
+  --bg: #fbfaf6;
+  --bg-subtle: #f5f2e8;
+  --surface: #ffffff;
+  --surface-raised: #f6f4ee;
+  --surface-hover: #efece3;
+
+  --border: #e2ded2;
+  --border-strong: #c9c4b6;
+
+  --fg: #14161b;
+  --fg-muted: #4b4f58;
+  --fg-subtle: #62666f;
+
+  /* Darkened so gold text on white clears AA. */
+  --accent: #7c620f;
+  --accent-hover: #664f0b;
+  --accent-fg: #ffffff;
+  --accent-soft: rgb(124 98 15 / 0.1);
+
+  --success: #0a7d56;
+  --success-fg: #07603f;
+  --success-soft: rgb(10 125 86 / 0.1);
+  --warning: #8a6300;
+  --warning-fg: #6d4e00;
+  --warning-soft: rgb(138 99 0 / 0.1);
+  --danger: #b42318;
+  --danger-fg: #94170e;
+  --danger-soft: rgb(180 35 24 / 0.08);
+
+  --shadow-raised: 0 12px 32px -12px rgb(20 22 27 / 0.18);
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-bg-subtle: var(--bg-subtle);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-hover: var(--surface-hover);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-subtle: var(--fg-subtle);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-soft: var(--accent-soft);
+  --color-slate: var(--slate);
+  --color-success: var(--success);
+  --color-success-fg: var(--success-fg);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-fg: var(--warning-fg);
+  --color-warning-soft: var(--warning-soft);
+  --color-danger: var(--danger);
+  --color-danger-fg: var(--danger-fg);
+  --color-danger-soft: var(--danger-soft);
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-manrope), var(--font-inter), ui-sans-serif, sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", "Cascadia Code", Menlo, Consolas, monospace;
+
+  --shadow-raised: var(--shadow-raised);
+  --radius-control: var(--radius);
+
+  --container-content: 76rem;
+  --container-prose: 44rem;
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-display);
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+
+  /* One focus treatment for every control, never removed. */
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  ::placeholder {
+    color: var(--fg-subtle);
+    opacity: 1;
+  }
+
+  ::selection {
+    background-color: var(--accent-soft);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
