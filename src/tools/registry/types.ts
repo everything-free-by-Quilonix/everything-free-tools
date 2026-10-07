@@ -32,6 +32,8 @@ export interface ToolCategory {
   /** URL segment under /categories/. */
   slug: string;
   name: string;
+  /** Two or three words for compact lists: "Build & debug". */
+  tagline: string;
   description: string;
 }
 
@@ -126,4 +128,24 @@ export interface ToolDefinition {
   /** Licence of this tool's own code. */
   license: string;
   dependencies?: readonly ToolDependency[];
+  /** Primary research ecosystem or origin. */
+  source?: "everything-free" | "webtools" | "91ai" | "100016" | "other";
+  /** All research ecosystems where this capability was identified. */
+  sources?: readonly ("everything-free" | "webtools" | "91ai" | "100016" | "other")[];
+  /** Universal integration mode. */
+  integrationMode?: "native" | "open-source-local" | "external" | "unavailable";
+  /** Whether the tool is completely free. */
+  free?: boolean;
+  /** Whether authentication or account is needed. */
+  requiresAuth?: boolean;
+  /** Whether data must be transmitted to an external service. */
+  requiresUpload?: boolean;
+  /** Processing engine reference or library name. */
+  engine?: string;
+  /** Input or output formats supported. */
+  supportedFormats?: readonly string[];
+  /** Search and categorization tags. */
+  tags?: readonly string[];
+  /** Fallback URL if external service. */
+  externalUrl?: string;
 }

@@ -4,6 +4,7 @@ import { useDeferredValue, useEffect, useMemo, useState } from "react";
 
 import { Panel } from "@/components/tool/panel";
 import { DownloadLink } from "@/components/ui/actions";
+import { Announcer } from "@/components/ui/announcer";
 import { Button } from "@/components/ui/button";
 import { Checkbox, Field, Segmented, Select, TextArea, TextInput } from "@/components/ui/field";
 import { EmptyState, ErrorState, Notice } from "@/components/ui/states";
@@ -94,6 +95,8 @@ export default function QrGeneratorWorkspace() {
 
   return (
     <div className="grid gap-4 lg:grid-cols-[3fr_2fr]">
+      {/* Announced when a code first appears, not on every keystroke that changes it. */}
+      <Announcer message={matrix ? "QR code ready. PNG and SVG downloads are below it." : ""} />
       <Panel title="Content">
         <div className="space-y-5">
           <Segmented
@@ -249,7 +252,7 @@ export default function QrGeneratorWorkspace() {
                 <path d={path} fill={foreground} />
               </svg>
             </div>
-            <p role="status" className="text-center text-xs text-fg-muted">
+            <p className="text-center text-xs text-fg-muted">
               Version {matrix.version} · {matrix.size - 2 * QUIET_ZONE} × {matrix.size - 2 * QUIET_ZONE} modules · error
               correction {ecc}
             </p>

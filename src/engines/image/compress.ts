@@ -13,6 +13,10 @@
  *   picks WebP (or PNG where WebP can't be encoded). If JPEG is chosen explicitly,
  *   transparent areas become white and the result says so.
  * - The encoder the browser actually used is reported (`blob.type`), not assumed.
+ *
+ * Memory: the decoded bitmap and one canvas are the only full-size buffers.
+ * Transparency is checked in strips of about 1 megapixel, not with one full-size
+ * `getImageData` copy, and both buffers are released as soon as the output exists.
  */
 
 import { ToolError } from "@/lib/errors";
@@ -75,26 +79,51 @@ export function clampQuality(quality: number): number {
   return Math.min(1, Math.max(0.1, quality));
 }
 
+/** Pixels read per strip when looking for transparency: 1 MP, a 4 MB buffer. */
+export const STRIP_PIXELS = 1 << 20;
+
+/** Rows per strip, so a scan never allocates a second full-size copy of the image. */
+export function stripRows(width: number): number {
+  return Math.max(1, Math.floor(STRIP_PIXELS / Math.max(1, width)));
+}
+
 type Canvas2D = OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D;
 
 interface Surface {
   context: Canvas2D;
   encode(type: EncodedType, quality: number): Promise<Blob>;
+  /** Frees the pixel buffer now rather than at garbage collection. Safari limits total canvas memory. */
+  release(): void;
+}
+
+function tooLarge(width: number, height: number, technical?: string): ToolError {
+  return new ToolError(
+    `This image is too large for your browser to process (${width} × ${height} pixels). Choose a smaller size under Resize, or try another browser.`,
+    technical,
+  );
 }
 
 function createSurface(width: number, height: number): Surface {
+  // Browsers return a null context, rather than throwing, when a canvas is over their size or memory limit.
   if (typeof OffscreenCanvas !== "undefined") {
     const canvas = new OffscreenCanvas(width, height);
     const context = canvas.getContext("2d");
-    if (!context) throw new ToolError("Your browser couldn't create a drawing surface for this image.");
-    return { context, encode: (type, quality) => canvas.convertToBlob({ type, quality }) };
+    if (!context) throw tooLarge(width, height, "OffscreenCanvas.getContext('2d') returned null");
+    return {
+      context,
+      encode: (type, quality) => canvas.convertToBlob({ type, quality }),
+      release: () => {
+        canvas.width = 0;
+        canvas.height = 0;
+      },
+    };
   }
   if (typeof document === "undefined") throw new ToolError("Image processing isn't available here.");
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
   const context = canvas.getContext("2d");
-  if (!context) throw new ToolError("Your browser couldn't create a drawing surface for this image.");
+  if (!context) throw tooLarge(width, height, "canvas.getContext('2d') returned null");
   return {
     context,
     encode: (type, quality) =>
@@ -105,7 +134,25 @@ function createSurface(width: number, height: number): Surface {
           quality,
         ),
       ),
+    release: () => {
+      canvas.width = 0;
+      canvas.height = 0;
+    },
   };
+}
+
+/** True when running on the page rather than in a worker (the fallback without OffscreenCanvas). */
+const onPage = () => typeof document !== "undefined";
+const yieldToPage = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+async function scanForTransparency(context: Canvas2D, width: number, height: number): Promise<boolean> {
+  const rows = stripRows(width);
+  for (let y = 0; y < height; y += rows) {
+    if (hasTransparentPixel(context.getImageData(0, y, width, Math.min(rows, height - y)).data)) return true;
+    // On the page, let clicks and scrolling through between strips.
+    if (onPage()) await yieldToPage();
+  }
+  return false;
 }
 
 async function decode(file: File): Promise<ImageBitmap> {
@@ -120,10 +167,13 @@ async function decode(file: File): Promise<ImageBitmap> {
   }
 }
 
+const ENCODED_TYPES = ["image/jpeg", "image/webp", "image/png"] as const;
+
 export async function compressImage(input: CompressInput, context?: TaskContext): Promise<CompressOutput> {
   const quality = clampQuality(input.quality);
   context?.progress(0.05, "Reading");
   const bitmap = await decode(input.file);
+  let surface: Surface | null = null;
 
   try {
     const originalWidth = bitmap.width;
@@ -131,30 +181,25 @@ export async function compressImage(input: CompressInput, context?: TaskContext)
     if (originalWidth === 0 || originalHeight === 0) throw new ToolError("This image has no pixels.");
     const { width, height } = scaleDimensions(originalWidth, originalHeight, input.maxDimension);
 
-    let surface: Surface;
     try {
       surface = createSurface(width, height);
     } catch (error) {
       if (error instanceof ToolError) throw error;
-      throw new ToolError(
-        `This image is too large for your browser to process (${width} × ${height} pixels). Try a smaller size.`,
-        String(error),
-      );
+      throw tooLarge(width, height, String(error));
     }
 
     context?.progress(0.3, "Drawing");
     surface.context.imageSmoothingQuality = "high";
     surface.context.drawImage(bitmap, 0, 0, width, height);
+    // The bitmap is no longer needed once drawn; free it before encoding.
+    bitmap.close();
 
     let hasTransparency = false;
     if (mayHaveTransparency(input.file.type)) {
       try {
-        hasTransparency = hasTransparentPixel(surface.context.getImageData(0, 0, width, height).data);
+        hasTransparency = await scanForTransparency(surface.context, width, height);
       } catch (error) {
-        throw new ToolError(
-          `This image is too large for your browser to process (${width} × ${height} pixels). Try a smaller size.`,
-          String(error),
-        );
+        throw tooLarge(width, height, String(error));
       }
     }
 
@@ -174,8 +219,7 @@ export async function compressImage(input: CompressInput, context?: TaskContext)
     if (blob.size === 0) throw new ToolError("The browser produced an empty image. Try a different output format.");
 
     // Browsers that can't encode a type return PNG instead of failing.
-    const actual =
-      (["image/jpeg", "image/webp", "image/png"] as const).find((type) => type === blob.type) ?? "image/png";
+    const actual = ENCODED_TYPES.find((type) => type === blob.type) ?? "image/png";
     context?.progress(1, "Done");
 
     return {
@@ -190,6 +234,8 @@ export async function compressImage(input: CompressInput, context?: TaskContext)
       ...(actual !== requested ? { substitutedFor: requested } : {}),
     };
   } finally {
+    // close() is idempotent; release() drops the canvas buffer immediately.
     bitmap.close();
+    surface?.release();
   }
 }

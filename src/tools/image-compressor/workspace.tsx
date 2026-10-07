@@ -6,10 +6,12 @@ import { Icon } from "@/components/icons";
 import { FileDropzone } from "@/components/tool/file-dropzone";
 import { Panel } from "@/components/tool/panel";
 import { DownloadLink } from "@/components/ui/actions";
+import { Announcer } from "@/components/ui/announcer";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, Segmented, Select } from "@/components/ui/field";
 import { EmptyState, ErrorState, Notice, ProgressBar } from "@/components/ui/states";
+import { focusSoon } from "@/components/ui/focus";
 import { useObjectUrl } from "@/components/ui/use-object-url";
 import type { CompressInput, CompressOutput, OutputChoice } from "@/engines/image/compress";
 import { hasCapability } from "@/lib/capabilities";
@@ -40,6 +42,19 @@ type Item = {
 
 let nextId = 1;
 
+/** Resolves after the next frame is painted, or after 100 ms, whichever comes first. */
+function nextPaint(): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, 100);
+    requestAnimationFrame(() =>
+      setTimeout(() => {
+        clearTimeout(timer);
+        resolve();
+      }, 0),
+    );
+  });
+}
+
 export default function ImageCompressorWorkspace() {
   const [items, setItems] = useState<Item[]>([]);
   const [rejected, setRejected] = useState<string[]>([]);
@@ -48,7 +63,10 @@ export default function ImageCompressorWorkspace() {
   const [maxDimension, setMaxDimension] = useState("");
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<{ index: number; total: number; value: number } | null>(null);
+  const [announcement, setAnnouncement] = useState("");
   const controller = useRef<AbortController | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const compressButton = useRef<HTMLButtonElement>(null);
 
   useEffect(() => () => controller.current?.abort(), []);
 
@@ -68,10 +86,13 @@ export default function ImageCompressorWorkspace() {
     const queue = items.map((item) => item.id);
     setItems((list) => list.map((item) => ({ id: item.id, file: item.file, status: "waiting" })));
     setRunning(true);
+    setAnnouncement(queue.length === 1 ? "Compressing the image." : `Compressing ${queue.length} images.`);
 
     // A worker is used when it can encode off the page (OffscreenCanvas); otherwise
     // the same engine runs on the page with a <canvas>.
     const useWorker = hasCapability("web-workers") && hasCapability("offscreen-canvas");
+    let succeeded = 0;
+    let failed = 0;
 
     for (const [index, id] of queue.entries()) {
       if (current.signal.aborted) break;
@@ -79,6 +100,11 @@ export default function ImageCompressorWorkspace() {
       if (!item) continue;
       update(id, { status: "working" });
       setProgress({ index, total: queue.length, value: 0 });
+      // On the page (no OffscreenCanvas), each image blocks rendering while it is
+      // drawn and encoded. Let the browser paint the progress and handle a Cancel
+      // click first. Bounded, because a hidden tab never paints.
+      if (!useWorker) await nextPaint();
+      if (current.signal.aborted) break;
 
       const input: CompressInput = {
         file: item.file,
@@ -87,6 +113,10 @@ export default function ImageCompressorWorkspace() {
         maxDimension: maxDimension ? Number(maxDimension) : null,
       };
 
+      // After a cancel, nothing from this run may touch the list again: cancel()
+      // has already reset it, and a newer run may own it by now. A worker is
+      // terminated at once; an on-page fallback can't be interrupted, so its late
+      // result is discarded here.
       try {
         const result = await runTask<CompressInput, CompressOutput>({
           input,
@@ -94,15 +124,17 @@ export default function ImageCompressorWorkspace() {
             ? () => new Worker(new URL("../../workers/image-compress.worker.ts", import.meta.url), { type: "module" })
             : undefined,
           fallback: () => import("@/engines/image/compress").then((engine) => engine.compressImage),
-          onProgress: (value) => setProgress({ index, total: queue.length, value }),
+          onProgress: (value) => {
+            if (!current.signal.aborted) setProgress({ index, total: queue.length, value });
+          },
           signal: current.signal,
         });
+        if (current.signal.aborted) break;
+        succeeded += 1;
         update(id, { status: "done", output: result });
       } catch (error) {
-        if (isAbort(error)) {
-          update(id, { status: "waiting" });
-          break;
-        }
+        if (current.signal.aborted || isAbort(error)) break;
+        failed += 1;
         update(id, { status: "error", error: toUserError(error, "We couldn't compress this image.") });
       }
     }
@@ -111,6 +143,8 @@ export default function ImageCompressorWorkspace() {
       controller.current = null;
       setRunning(false);
       setProgress(null);
+      const problems = failed > 0 ? ` ${failed} couldn't be compressed; see the results.` : "";
+      setAnnouncement(`Compressed ${succeeded} of ${queue.length}.${problems}`);
     }
   };
 
@@ -119,7 +153,22 @@ export default function ImageCompressorWorkspace() {
     controller.current = null;
     setRunning(false);
     setProgress(null);
+    setAnnouncement("Cancelled.");
     setItems((list) => list.map((item) => (item.status === "working" ? { ...item, status: "waiting" } : item)));
+    // The Cancel button is gone once this renders; keep keyboard focus in the tool.
+    focusSoon(compressButton);
+  };
+
+  const removeAll = () => {
+    setItems([]);
+    setRejected([]);
+    focusSoon(fileInput);
+  };
+
+  const removeOne = (id: number) => {
+    const remaining = items.filter((entry) => entry.id !== id);
+    setItems(remaining);
+    focusSoon(remaining.length > 0 ? compressButton : fileInput);
   };
 
   const done = items.filter((item) => item.status === "done");
@@ -129,6 +178,7 @@ export default function ImageCompressorWorkspace() {
 
   return (
     <div className="space-y-4">
+      <Announcer message={announcement} />
       <div className="grid gap-4 lg:grid-cols-[3fr_2fr]">
         <Panel title="Images">
           <FileDropzone
@@ -138,6 +188,7 @@ export default function ImageCompressorWorkspace() {
             label="Choose images to compress"
             hint="JPEG, PNG, WebP, AVIF or BMP."
             disabled={running}
+            inputRef={fileInput}
           />
           {rejected.length > 0 ? (
             <Notice tone="warning" className="mt-3" title="Some files were skipped" role="alert">
@@ -186,6 +237,7 @@ export default function ImageCompressorWorkspace() {
                 <input
                   id={context.id}
                   aria-describedby={context.describedBy}
+                  aria-valuetext={`${quality}%`}
                   type="range"
                   min={10}
                   max={100}
@@ -214,7 +266,7 @@ export default function ImageCompressorWorkspace() {
               )}
             </Field>
             <div className="flex flex-wrap gap-2">
-              <Button onClick={compressAll} disabled={items.length === 0 || running}>
+              <Button ref={compressButton} onClick={compressAll} disabled={items.length === 0 || running}>
                 {done.length > 0 ? "Compress again" : items.length > 1 ? `Compress ${items.length} images` : "Compress"}
               </Button>
               {running ? (
@@ -222,13 +274,7 @@ export default function ImageCompressorWorkspace() {
                   Cancel
                 </Button>
               ) : items.length > 0 ? (
-                <Button
-                  variant="ghost"
-                  onClick={() => {
-                    setItems([]);
-                    setRejected([]);
-                  }}
-                >
+                <Button variant="ghost" onClick={removeAll}>
                   Remove all
                 </Button>
               ) : null}
@@ -251,20 +297,14 @@ export default function ImageCompressorWorkspace() {
         ) : (
           <>
             {done.length > 0 && !running ? (
-              <p role="status" className="mb-4 text-sm text-fg-muted">
+              <p className="mb-4 text-sm text-fg-muted">
                 Compressed {done.length} of {items.length}: {formatBytes(totalBefore)} → {formatBytes(totalAfter)} (
                 {savedLabel(totalBefore, totalAfter)}).
               </p>
             ) : null}
             <ul className="space-y-3">
               {items.map((item) => (
-                <ResultRow
-                  key={item.id}
-                  item={item}
-                  onRemove={
-                    running ? undefined : () => setItems((list) => list.filter((entry) => entry.id !== item.id))
-                  }
-                />
+                <ResultRow key={item.id} item={item} onRemove={running ? undefined : () => removeOne(item.id)} />
               ))}
             </ul>
           </>
@@ -354,7 +394,7 @@ function Thumb({ url, label }: { url: string | null; label: string }) {
       <div className="grid size-20 place-items-center overflow-hidden rounded-md border border-border bg-[repeating-conic-gradient(var(--surface-raised)_0_25%,var(--surface)_0_50%)] bg-[length:16px_16px]">
         {url ? (
           // eslint-disable-next-line @next/next/no-img-element -- local object URL; next/image can't optimise it
-          <img src={url} alt="" className="max-h-full max-w-full object-contain" />
+          <img src={url} alt="" decoding="async" loading="lazy" className="max-h-full max-w-full object-contain" />
         ) : null}
       </div>
       <figcaption className="mt-1 text-center text-[11px] text-fg-subtle">{label}</figcaption>

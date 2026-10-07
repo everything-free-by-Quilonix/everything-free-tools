@@ -12,9 +12,15 @@
  *   your device": even a bug could not send data to another host.
  * - worker-src 'self': processing workers are same-origin build output.
  * - img-src blob: data:: previews of locally generated results.
- * - style-src-attr 'unsafe-inline': React `style={{…}}` attributes cannot be hashed.
- *   Injected `<style>` elements are still blocked by style-src-elem 'self'.
+ * - Styles: stylesheets from 'self' only, and no inline style attributes or <style>
+ *   elements at all. React applies its `style={{…}}` props through the CSSOM, which CSP
+ *   does not govern, so nothing legitimate needs 'unsafe-inline'.
  * - frame-ancestors / report-to are ignored in meta policies, so they are omitted.
+ * - No upgrade-insecure-requests: every fetch directive allows only 'self', data:
+ *   or blob:, and on an HTTPS page 'self' never matches an http:// URL, so the
+ *   directive could not upgrade anything that would otherwise load. It is not a
+ *   loss of protection. (WebKit also applies it to http://localhost, which made
+ *   the export impossible to test locally in a Safari engine.)
  *
  * The build fails if a page contains an inline event handler or a javascript: URL,
  * which a hash-based policy would silently break.
@@ -32,9 +38,8 @@ export function buildPolicy(scriptHashes) {
     "default-src 'self'",
     `script-src ${["'self'", ...scriptHashes.map((hash) => `'sha256-${hash}'`)].join(" ")}`,
     "worker-src 'self'",
-    "style-src 'self' 'unsafe-inline'",
-    "style-src-elem 'self'",
-    "style-src-attr 'unsafe-inline'",
+    "style-src 'self'",
+    "style-src-attr 'none'",
     "img-src 'self' data: blob:",
     "media-src 'self' blob:",
     "font-src 'self'",
@@ -44,7 +49,6 @@ export function buildPolicy(scriptHashes) {
     "object-src 'none'",
     "base-uri 'self'",
     "form-action 'self'",
-    "upgrade-insecure-requests",
   ].join("; ");
 }
 
@@ -56,6 +60,43 @@ async function* htmlFiles(dir) {
     if (entry.isDirectory()) yield* htmlFiles(path);
     else if (entry.name.endsWith(".html")) yield path;
   }
+}
+
+/**
+ * Invariants of the policy. Checked on every exported page, so a later change that
+ * loosens it (say, adding 'unsafe-inline' to get something working) fails the build.
+ */
+export function policyProblems(policy) {
+  const directives = new Map(
+    policy
+      .split(";")
+      .map((part) => part.trim().split(/\s+/))
+      .filter((tokens) => tokens[0])
+      .map(([name, ...values]) => [name, values]),
+  );
+  const problems = [];
+  const expect = (name, allowed) => {
+    const values = directives.get(name);
+    if (!values) return problems.push(`${name} is missing`);
+    const extra = values.filter(
+      (value) => !allowed.some((rule) => (rule instanceof RegExp ? rule.test(value) : rule === value)),
+    );
+    if (extra.length > 0) problems.push(`${name} allows ${extra.join(" ")}`);
+  };
+  expect("default-src", ["'self'"]);
+  expect("script-src", ["'self'", /^'sha256-[A-Za-z0-9+/]+=*'$/]);
+  expect("worker-src", ["'self'"]);
+  expect("connect-src", ["'self'"]);
+  expect("frame-src", ["'none'"]);
+  expect("object-src", ["'none'"]);
+  expect("base-uri", ["'self'"]);
+  expect("form-action", ["'self'"]);
+  expect("img-src", ["'self'", "data:", "blob:"]);
+  expect("style-src", ["'self'"]);
+  expect("style-src-attr", ["'none'"]);
+  if (/unsafe-inline|unsafe-eval|unsafe-hashes|strict-dynamic|\*/.test(policy))
+    problems.push("policy contains a wildcard or unsafe keyword");
+  return problems;
 }
 
 export async function applyCsp(outDir) {
@@ -79,7 +120,9 @@ export async function applyCsp(outDir) {
       if (!DATA_BLOCK.test(attributes)) hashes.add(sha256(content));
     }
 
-    const meta = `<meta http-equiv="Content-Security-Policy" content="${buildPolicy([...hashes])}"/>`;
+    const policy = buildPolicy([...hashes]);
+    for (const problem of policyProblems(policy)) problems.push(`${file}: ${problem}`);
+    const meta = `<meta http-equiv="Content-Security-Policy" content="${policy}"/>`;
     const charset = /<meta charSet="utf-8"\s*\/?>/i;
     if (charset.test(html)) html = html.replace(charset, (tag) => `${tag}${meta}`);
     else if (/<head[^>]*>/i.test(html)) html = html.replace(/<head[^>]*>/i, (tag) => `${tag}${meta}`);

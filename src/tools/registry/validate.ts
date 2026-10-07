@@ -38,6 +38,16 @@ export function findRegistryProblems(tools: readonly ToolDefinition[]): string[]
 
     const overlap = tool.capabilities.required.filter((c) => tool.capabilities.optional?.includes(c));
     if (overlap.length > 0) problems.push(`${where} lists ${overlap.join(", ")} as both required and optional`);
+
+    // An external tool is a link to another service. It must say where it goes, and
+    // it cannot wear the "processed locally" label.
+    if (tool.integrationMode === "external") {
+      if (!tool.externalUrl || !/^https:\/\//.test(tool.externalUrl))
+        problems.push(`${where} is external but has no https externalUrl`);
+      if (tool.processing === "LOCAL") problems.push(`${where} is external but marked LOCAL`);
+    } else if (tool.externalUrl) {
+      problems.push(`${where} has an externalUrl but is not marked external`);
+    }
   }
 
   for (const tool of tools) {

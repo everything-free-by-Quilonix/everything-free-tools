@@ -64,8 +64,36 @@ export interface DecodedBase64 {
 }
 
 /** Decodes standard or URL-safe Base64, padded or not. Throws a `ToolError` describing the problem. */
+/** ASCII whitespace only, as in the WHATWG forgiving-base64 algorithm. A no-break space is not whitespace here. */
+const ASCII_WHITESPACE = /[\t\n\f\r ]/;
+
+/** Shows a character so it can be found: invisible and space-like characters by code point. */
+function showChar(char: string): string {
+  const code = char.codePointAt(0)!;
+  return /[\p{Z}\p{C}]/u.test(char) ? `U+${code.toString(16).toUpperCase().padStart(4, "0")}` : `“${char}”`;
+}
+
 export function decodeBase64(input: string): DecodedBase64 {
-  const text = input.replace(/[\s]+/g, "");
+  // Positions in messages count characters of the input as typed, whitespace included.
+  let seenPadding = false;
+  for (let i = 0; i < input.length; i += 1) {
+    const char = input[i]!;
+    if (ASCII_WHITESPACE.test(char)) continue;
+    if (char === "=") {
+      seenPadding = true;
+      continue;
+    }
+    const code = char.charCodeAt(0);
+    if (code >= 128 || LOOKUP[code] === -1) {
+      const full = String.fromCodePoint(input.codePointAt(i)!);
+      throw new ToolError(`${showChar(full)} at position ${i + 1} isn't a Base64 character.`);
+    }
+    if (seenPadding) {
+      throw new ToolError(`Padding (“=”) can only appear at the end, but there is more after it at position ${i + 1}.`);
+    }
+  }
+
+  const text = input.replace(/[\t\n\f\r ]+/g, "");
   if (text.length === 0) throw new ToolError("There's nothing to decode yet.");
 
   const hasStandard = /[+/]/.test(text);
@@ -77,23 +105,7 @@ export function decodeBase64(input: string): DecodedBase64 {
   const firstPad = text.indexOf("=");
   const body = firstPad === -1 ? text : text.slice(0, firstPad);
   const padding = firstPad === -1 ? "" : text.slice(firstPad);
-
-  if (!/^={0,2}$/.test(padding)) {
-    throw new ToolError(
-      /[^=]/.test(padding)
-        ? `Padding (“=”) can only appear at the end, but there is more after it at position ${firstPad + 1}.`
-        : "There are too many “=” padding characters at the end.",
-    );
-  }
-
-  for (let i = 0; i < body.length; i += 1) {
-    const code = body.charCodeAt(i);
-    if (code >= 128 || LOOKUP[code] === -1) {
-      throw new ToolError(
-        `“${String.fromCodePoint(body.codePointAt(i)!)}” at position ${i + 1} isn't a Base64 character.`,
-      );
-    }
-  }
+  if (padding.length > 2) throw new ToolError("There are too many “=” padding characters at the end.");
 
   if (body.length % 4 === 1) {
     throw new ToolError("The length of this text isn't possible for Base64. A character may be missing or extra.");

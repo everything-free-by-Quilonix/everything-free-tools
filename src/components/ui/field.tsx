@@ -13,8 +13,10 @@ import { cn } from "@/lib/cn";
  * `aria-invalid`. A control cannot be rendered without a label.
  */
 
+// 16 px text on small screens: iOS Safari zooms the page when a control with
+// smaller text is focused, which pushes the tool off screen under the keyboard.
 export const controlClasses =
-  "w-full rounded-[var(--radius)] border border-border-strong bg-bg px-3 py-2.5 text-sm text-fg " +
+  "w-full rounded-[var(--radius)] border border-border-strong bg-bg px-3 py-2.5 text-base text-fg sm:text-sm " +
   "transition-colors hover:border-fg-subtle focus-visible:border-accent " +
   "disabled:cursor-not-allowed disabled:opacity-60 aria-[invalid=true]:border-danger-fg";
 

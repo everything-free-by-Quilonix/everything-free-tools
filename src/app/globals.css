@@ -4,44 +4,54 @@
  * Everything.Free Tools design tokens
  * ---------------------------------------------------------------------------
  * Colour is only ever referenced through semantic tokens (bg, surface, fg,
- * border, accent, status), never raw hex in components. Dark values live on
- * :root so the site renders correctly before and without JavaScript. A light
- * theme is a token swap under `.light`; it is defined but not exposed yet.
+ * border, accent, status), never raw hex in components.
  *
- * Gold is an accent: focus rings, the primary action, small highlights. It is
- * never a surface colour.
+ * Themes. The site follows the operating system (prefers-color-scheme). The
+ * header toggle overrides it for the current visit by putting `.light` or
+ * `.dark` on <html>; nothing is stored, because the site stores nothing.
+ * Dark values sit on :root so the page renders correctly before and without
+ * JavaScript; the light set is repeated for the media query and the override,
+ * since CSS cannot share one block between a media query and a class.
+ *
+ * Gold is an accent: focus rings, the primary action, small marks. It is never
+ * a surface colour. Elevation comes from surface steps and hairline borders,
+ * not from shadows, so both themes stay calm.
  */
 
-@custom-variant dark (&:where(:root:not(.light), .dark, .dark *));
+@custom-variant dark (&:where(.dark, .dark *));
 
 :root {
   color-scheme: dark;
 
-  --bg: #0a0a0f;
-  --bg-subtle: #0d1117;
-  --surface: #111318;
-  --surface-raised: #171a20;
-  --surface-hover: #1d2129;
+  --bg: #0b0b0e;
+  --bg-subtle: #0f1014;
+  --surface: #131419;
+  --surface-raised: #191b21;
+  --surface-hover: #1f2129;
+  --surface-sunken: #08080b;
 
-  --border: #242833;
-  --border-strong: #353b48;
+  --border: #23252e;
+  --border-strong: #343743;
 
-  --fg: #f5f2e8;
-  /* 9.7:1 on --bg. */
-  --fg-muted: #b3b0a6;
-  /* 5.6:1 on --bg: still AA for body text, used for secondary metadata. */
-  --fg-subtle: #8c8a82;
+  --fg: #f4f1e8;
+  /* 10:1 on --bg. */
+  --fg-muted: #b5b2a8;
+  /* 5.7:1 on --bg: AA for body text, used for secondary metadata. */
+  --fg-subtle: #8f8d85;
 
   --accent: #d4af37;
   --accent-hover: #e2c158;
-  --accent-fg: #0a0a0f;
+  --accent-fg: #0b0b0e;
   --accent-soft: rgb(212 175 55 / 0.12);
-
-  --slate: #334155;
+  --accent-text: #e0bf55;
 
   --success: #0faf78;
-  --success-fg: #41d6a2;
-  --success-soft: rgb(15 175 120 / 0.12);
+  --success-fg: #45d8a5;
+  --success-soft: rgb(15 175 120 / 0.1);
+
+  --info: #4f8fd9;
+  --info-fg: #8db9ef;
+  --info-soft: rgb(79 143 217 / 0.12);
 
   --warning: #d99a00;
   --warning-fg: #f0b93a;
@@ -51,43 +61,96 @@
   --danger-fg: #f6877d;
   --danger-soft: rgb(180 35 24 / 0.16);
 
-  --shadow-raised: 0 12px 32px -12px rgb(0 0 0 / 0.7);
+  --overlay: rgb(4 4 6 / 0.72);
+  --shadow-raised: 0 1px 0 rgb(255 255 255 / 0.03) inset, 0 12px 32px -16px rgb(0 0 0 / 0.8);
+  --shadow-overlay: 0 0 0 1px rgb(255 255 255 / 0.04), 0 24px 64px -12px rgb(0 0 0 / 0.75);
   --radius: 0.625rem;
+  --radius-lg: 0.875rem;
 }
 
-.light {
+@media (prefers-color-scheme: light) {
+  :root:not(.dark) {
+    color-scheme: light;
+
+    --bg: #fbfaf7;
+    --bg-subtle: #f4f2ec;
+    --surface: #ffffff;
+    --surface-raised: #f7f5f0;
+    --surface-hover: #efece4;
+    --surface-sunken: #f1efe8;
+
+    --border: #e4e0d6;
+    --border-strong: #cdc8bb;
+
+    --fg: #15161a;
+    --fg-muted: #4a4d55;
+    --fg-subtle: #61646c;
+
+    /* Darkened so gold text on white clears AA. */
+    --accent: #7c620f;
+    --accent-hover: #654f0a;
+    --accent-fg: #ffffff;
+    --accent-soft: rgb(124 98 15 / 0.09);
+    --accent-text: #6f570c;
+
+    --success: #0a7d56;
+    --success-fg: #07603f;
+    --success-soft: rgb(10 125 86 / 0.08);
+    --info: #1f5fa8;
+    --info-fg: #1a4f8c;
+    --info-soft: rgb(31 95 168 / 0.08);
+    --warning: #8a6300;
+    --warning-fg: #6d4e00;
+    --warning-soft: rgb(138 99 0 / 0.09);
+    --danger: #b42318;
+    --danger-fg: #94170e;
+    --danger-soft: rgb(180 35 24 / 0.07);
+
+    --overlay: rgb(21 22 26 / 0.4);
+    --shadow-raised: 0 1px 2px rgb(21 22 26 / 0.04), 0 12px 32px -18px rgb(21 22 26 / 0.18);
+    --shadow-overlay: 0 0 0 1px rgb(21 22 26 / 0.06), 0 24px 64px -16px rgb(21 22 26 / 0.28);
+  }
+}
+
+:root.light {
   color-scheme: light;
 
-  --bg: #fbfaf6;
-  --bg-subtle: #f5f2e8;
+  --bg: #fbfaf7;
+  --bg-subtle: #f4f2ec;
   --surface: #ffffff;
-  --surface-raised: #f6f4ee;
-  --surface-hover: #efece3;
+  --surface-raised: #f7f5f0;
+  --surface-hover: #efece4;
+  --surface-sunken: #f1efe8;
 
-  --border: #e2ded2;
-  --border-strong: #c9c4b6;
+  --border: #e4e0d6;
+  --border-strong: #cdc8bb;
 
-  --fg: #14161b;
-  --fg-muted: #4b4f58;
-  --fg-subtle: #62666f;
+  --fg: #15161a;
+  --fg-muted: #4a4d55;
+  --fg-subtle: #61646c;
 
-  /* Darkened so gold text on white clears AA. */
   --accent: #7c620f;
-  --accent-hover: #664f0b;
+  --accent-hover: #654f0a;
   --accent-fg: #ffffff;
-  --accent-soft: rgb(124 98 15 / 0.1);
+  --accent-soft: rgb(124 98 15 / 0.09);
+  --accent-text: #6f570c;
 
   --success: #0a7d56;
   --success-fg: #07603f;
-  --success-soft: rgb(10 125 86 / 0.1);
+  --success-soft: rgb(10 125 86 / 0.08);
+  --info: #1f5fa8;
+  --info-fg: #1a4f8c;
+  --info-soft: rgb(31 95 168 / 0.08);
   --warning: #8a6300;
   --warning-fg: #6d4e00;
-  --warning-soft: rgb(138 99 0 / 0.1);
+  --warning-soft: rgb(138 99 0 / 0.09);
   --danger: #b42318;
   --danger-fg: #94170e;
-  --danger-soft: rgb(180 35 24 / 0.08);
+  --danger-soft: rgb(180 35 24 / 0.07);
 
-  --shadow-raised: 0 12px 32px -12px rgb(20 22 27 / 0.18);
+  --overlay: rgb(21 22 26 / 0.4);
+  --shadow-raised: 0 1px 2px rgb(21 22 26 / 0.04), 0 12px 32px -18px rgb(21 22 26 / 0.18);
+  --shadow-overlay: 0 0 0 1px rgb(21 22 26 / 0.06), 0 24px 64px -16px rgb(21 22 26 / 0.28);
 }
 
 @theme inline {
@@ -96,6 +159,7 @@
   --color-surface: var(--surface);
   --color-surface-raised: var(--surface-raised);
   --color-surface-hover: var(--surface-hover);
+  --color-surface-sunken: var(--surface-sunken);
   --color-border: var(--border);
   --color-border-strong: var(--border-strong);
   --color-fg: var(--fg);
@@ -105,26 +169,61 @@
   --color-accent-hover: var(--accent-hover);
   --color-accent-fg: var(--accent-fg);
   --color-accent-soft: var(--accent-soft);
-  --color-slate: var(--slate);
+  --color-accent-text: var(--accent-text);
   --color-success: var(--success);
   --color-success-fg: var(--success-fg);
   --color-success-soft: var(--success-soft);
+  --color-info: var(--info);
+  --color-info-fg: var(--info-fg);
+  --color-info-soft: var(--info-soft);
   --color-warning: var(--warning);
   --color-warning-fg: var(--warning-fg);
   --color-warning-soft: var(--warning-soft);
   --color-danger: var(--danger);
   --color-danger-fg: var(--danger-fg);
   --color-danger-soft: var(--danger-soft);
+  --color-overlay: var(--overlay);
 
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
   --font-display: var(--font-manrope), var(--font-inter), ui-sans-serif, sans-serif;
   --font-mono: ui-monospace, "SFMono-Regular", "Cascadia Code", Menlo, Consolas, monospace;
 
   --shadow-raised: var(--shadow-raised);
+  --shadow-overlay: var(--shadow-overlay);
   --radius-control: var(--radius);
+  --radius-panel: var(--radius-lg);
+
+  /* Type scale: compact, technical. Display sizes are reserved for page titles. */
+  --text-2xs: 0.6875rem;
+  --text-2xs--line-height: 1rem;
 
   --container-content: 76rem;
   --container-prose: 44rem;
+
+  --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
+
+  --animate-pop-in: pop-in 140ms var(--ease-out-soft);
+  --animate-fade-in: fade-in 140ms ease-out;
+
+  @keyframes pop-in {
+    from {
+      opacity: 0;
+      transform: translateY(-4px) scale(0.985);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
 }
 
 @layer base {
@@ -134,12 +233,14 @@
 
   html {
     -webkit-text-size-adjust: 100%;
+    scroll-padding-top: 4.5rem;
   }
 
   body {
     background-color: var(--bg);
     color: var(--fg);
     font-family: var(--font-sans);
+    font-feature-settings: "cv11", "ss01";
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
   }
@@ -148,7 +249,7 @@
   h2,
   h3 {
     font-family: var(--font-display);
-    letter-spacing: -0.02em;
+    letter-spacing: -0.015em;
     text-wrap: balance;
   }
 
@@ -169,6 +270,19 @@
 
   ::selection {
     background-color: var(--accent-soft);
+  }
+
+  /* Native search inputs: the site supplies its own clear button where one is needed. */
+  input[type="search"]::-webkit-search-cancel-button {
+    -webkit-appearance: none;
+  }
+
+  kbd {
+    font-family: var(--font-sans);
+  }
+
+  dialog::backdrop {
+    background-color: var(--overlay);
   }
 
   @media (prefers-reduced-motion: reduce) {

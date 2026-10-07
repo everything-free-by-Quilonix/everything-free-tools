@@ -49,6 +49,7 @@ export function checkFiles(files: Iterable<File>, accept: readonly string[]): Fi
     ["bmp", "image/bmp"],
     ["json", "application/json"],
     ["txt", "text/plain"],
+    ["pdf", "application/pdf"],
   ]);
 
   for (const file of files) {
@@ -80,12 +81,25 @@ export function baseName(name: string): string {
  */
 export function safeFileName(name: string, fallback = "download"): string {
   const cleaned = name
-    .replace(/[\\/:*?"<>|\u0000-\u001f]/g, "-")
+    // Path separators, characters Windows forbids, and control characters.
+    .replace(/[\\/:*?"<>|\u0000-\u001f\u007f]/g, "-")
+    // Bidirectional overrides and invisible characters, which can disguise an
+    // extension ("photo\u202Egnp.exe" displays as "photoexe.png").
+    .replace(/[\u200b-\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/g, "")
     .replace(/\s+/g, " ")
     .trim()
-    .slice(0, 120);
-  return cleaned.length > 0 && cleaned !== "." && cleaned !== ".." ? cleaned : fallback;
+    // No hidden files (".name"), and Windows drops trailing dots and spaces.
+    .replace(/^\.+/, "")
+    .replace(/[. ]+$/, "");
+  if (cleaned.length === 0) return fallback;
+  if (cleaned.length <= MAX_NAME) return cleaned;
+  // Too long: shorten the name but keep the extension, so the file still opens.
+  const dot = cleaned.lastIndexOf(".");
+  const extension = dot > 0 && cleaned.length - dot <= 10 ? cleaned.slice(dot) : "";
+  return cleaned.slice(0, MAX_NAME - extension.length).replace(/[. ]+$/, "") + extension;
 }
+
+const MAX_NAME = 120;
 
 /** "holiday.png" + "compressed" + "webp" → "holiday-compressed.webp" */
 export function derivedFileName(original: string, suffix: string, extension: string): string {
