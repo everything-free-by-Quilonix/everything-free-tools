@@ -64,3 +64,78 @@ describe("UUID generator", () => {
     assert.throws(() => createUuidV7Generator({} as unknown as Crypto), ToolError);
   });
 });
+
+describe("UUID generator: randomness and bit layout", () => {
+  const bits = (uuid: string) =>
+    [...uuid.replace(/-/g, "")].map((digit) => Number.parseInt(digit, 16).toString(2).padStart(4, "0")).join("");
+
+  it("never calls Math.random", () => {
+    const original = Math.random;
+    Math.random = () => {
+      throw new Error("Math.random was called");
+    };
+    try {
+      generateUuids({ version: 4, count: 100 });
+      generateUuids({ version: 7, count: 100 });
+      uuidV4({ getRandomValues: crypto.getRandomValues.bind(crypto) });
+    } finally {
+      Math.random = original;
+    }
+  });
+
+  it("sets exactly the version and variant bits, and leaves every other bit random", () => {
+    // Positions (0-based, of 128) fixed by RFC 9562: version 48–51, variant 64–65.
+    for (const version of [4, 7] as const) {
+      const samples = generateUuids({ version, count: 1000 }).map(bits);
+      const ones = Array.from(
+        { length: 128 },
+        (_, position) => samples.filter((sample) => sample[position] === "1").length,
+      );
+      assert.equal(samples[0]!.slice(48, 52), version === 4 ? "0100" : "0111");
+      assert.ok(
+        samples.every((sample) => sample.slice(64, 66) === "10"),
+        "variant must be 10",
+      );
+      // Random bits: v4 is random outside the fixed fields; v7 from bit 80 on (after the timestamp and counter).
+      const randomFrom = version === 4 ? 0 : 80;
+      for (let position = randomFrom; position < 128; position += 1) {
+        if ((position >= 48 && position < 52) || position === 64 || position === 65) continue;
+        // 1000 fair coin flips land between 380 and 620 with overwhelming probability; a stuck bit gives 0 or 1000.
+        assert.ok(
+          ones[position]! > 380 && ones[position]! < 620,
+          `bit ${position} looks stuck (${ones[position]}/1000)`,
+        );
+      }
+    }
+  });
+
+  it("is not deterministic: separate batches share no values", () => {
+    const first = new Set(generateUuids({ version: 4, count: 1000 }));
+    assert.ok(generateUuids({ version: 4, count: 1000 }).every((uuid) => !first.has(uuid)));
+    const firstV7 = new Set(generateUuids({ version: 7, count: 1000 }));
+    assert.ok(generateUuids({ version: 7, count: 1000 }).every((uuid) => !firstV7.has(uuid)));
+  });
+
+  it("v7 sorts across millisecond boundaries and survives counter overflow", () => {
+    let time = 1_750_000_000_000;
+    const next = createUuidV7Generator(undefined, () => time);
+    const list: string[] = [];
+    for (let ms = 0; ms < 3; ms += 1) {
+      // More than the 4,096 values the 12-bit counter holds, all in one millisecond.
+      for (let i = 0; i < 5000; i += 1) list.push(next());
+      time += 1;
+    }
+    assert.deepEqual([...list].sort(), list);
+    assert.equal(new Set(list).size, list.length);
+    // Borrowing future milliseconds on overflow keeps the timestamp within a few ms of the clock.
+    const last = inspectUuid(list.at(-1)!)!.timestamp!;
+    assert.ok(last - time < 10, `timestamp ran ${last - time} ms ahead`);
+  });
+
+  it("v7 timestamps carry the current time", () => {
+    const before = Date.now();
+    const [uuid] = generateUuids({ version: 7, count: 1 });
+    const stamp = inspectUuid(uuid!)!.timestamp!;
+    assert.ok(stamp >= before && stamp <= Date.now());
+  });
+});

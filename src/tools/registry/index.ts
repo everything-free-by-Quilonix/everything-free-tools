@@ -44,3 +44,21 @@ export function relatedTools(tool: ToolDefinition, limit = 3): ToolDefinition[] 
   }
   return chosen.slice(0, limit);
 }
+
+/**
+ * Categories close to this one: those that share tools with it (through `alsoIn`),
+ * most shared first, then the remaining populated categories by size. Derived, so
+ * it stays right as tools are added.
+ */
+export function relatedCategories(id: ToolCategoryId, limit = 4): ToolCategory[] {
+  const own = new Set(toolsInCategory(id).map((tool) => tool.slug));
+  return populatedCategories()
+    .filter((category) => category.id !== id)
+    .map((category) => {
+      const list = toolsInCategory(category.id);
+      return { category, shared: list.filter((tool) => own.has(tool.slug)).length, size: list.length };
+    })
+    .sort((a, b) => b.shared - a.shared || b.size - a.size || a.category.name.localeCompare(b.category.name))
+    .slice(0, limit)
+    .map((entry) => entry.category);
+}

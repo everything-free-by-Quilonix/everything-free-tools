@@ -4,6 +4,7 @@ import { useState } from "react";
 
 import { Panel } from "@/components/tool/panel";
 import { CopyButton, DownloadLink } from "@/components/ui/actions";
+import { Announcer } from "@/components/ui/announcer";
 import { Button } from "@/components/ui/button";
 import { Checkbox, Field, Segmented, TextArea, TextInput } from "@/components/ui/field";
 import { EmptyState, ErrorState, Notice } from "@/components/ui/states";
@@ -17,8 +18,9 @@ export default function UuidGeneratorWorkspace() {
   const [uppercase, setUppercase] = useState(false);
   const [compact, setCompact] = useState(false);
   const [braces, setBraces] = useState(false);
-  const [uuids, setUuids] = useState<string[]>([]);
-  const [blob, setBlob] = useState<Blob | null>(null);
+  // The batch remembers the version it was made with, so changing the option
+  // afterwards can't mislabel the result or its file name.
+  const [batch, setBatch] = useState<{ list: string[]; version: UuidVersion; number: number; blob: Blob } | null>(null);
   const [error, setError] = useState<UserError | null>(null);
 
   const parsed = Number(count);
@@ -31,20 +33,29 @@ export default function UuidGeneratorWorkspace() {
     if (countError) return;
     try {
       const list = generateUuids({ version, count: parsed, uppercase, compact, braces });
-      setUuids(list);
-      setBlob(textBlob(`${list.join("\n")}\n`));
+      setBatch((previous) => ({
+        list,
+        version,
+        number: (previous?.number ?? 0) + 1,
+        blob: textBlob(`${list.join("\n")}\n`),
+      }));
       setError(null);
     } catch (caught) {
-      setUuids([]);
-      setBlob(null);
+      setBatch(null);
       setError(toUserError(caught));
     }
   };
 
+  const uuids = batch?.list ?? [];
   const text = uuids.join("\n");
+  const summary = batch
+    ? `Generated ${uuids.length.toLocaleString("en")} version ${batch.version} ${uuids.length === 1 ? "UUID" : "UUIDs"}.`
+    : "";
 
   return (
     <div className="grid gap-4 lg:grid-cols-[2fr_3fr]">
+      {/* The batch number makes a repeat of the same request announce again. */}
+      <Announcer message={batch ? `${summary} Batch ${batch.number}.` : ""} />
       <Panel title="Options">
         <form
           className="space-y-5"
@@ -108,7 +119,12 @@ export default function UuidGeneratorWorkspace() {
           uuids.length > 0 ? (
             <>
               <CopyButton text={text} label={uuids.length === 1 ? "Copy" : "Copy all"} />
-              <DownloadLink blob={blob} fileName={`uuids-v${version}.txt`} label="Download .txt" variant="secondary" />
+              <DownloadLink
+                blob={batch?.blob ?? null}
+                fileName={`uuids-v${batch?.version ?? version}.txt`}
+                label="Download .txt"
+                variant="secondary"
+              />
             </>
           ) : null
         }
@@ -121,9 +137,7 @@ export default function UuidGeneratorWorkspace() {
         ) : null}
         {uuids.length > 0 ? (
           <div className="space-y-3">
-            <p role="status" className="text-sm text-fg-muted">
-              Generated {uuids.length.toLocaleString("en")} version {version} {uuids.length === 1 ? "UUID" : "UUIDs"}.
-            </p>
+            <p className="text-sm text-fg-muted">{summary}</p>
             <Field label="Generated UUIDs" hideLabel>
               {(context) => (
                 <TextArea
@@ -132,7 +146,7 @@ export default function UuidGeneratorWorkspace() {
                   rows={Math.min(14, Math.max(3, uuids.length))}
                   value={text}
                   spellCheck={false}
-                  className="font-mono text-[13px]"
+                  className="font-mono"
                 />
               )}
             </Field>

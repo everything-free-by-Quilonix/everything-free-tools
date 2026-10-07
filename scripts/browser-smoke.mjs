@@ -435,6 +435,7 @@ async function main() {
       "/",
       "/tools/",
       ...TOOL_SLUGS.map((slug) => `/tools/${slug}/`),
+      "/categories/",
       "/categories/developer/",
       "/categories/image/",
       "/about/",
@@ -466,9 +467,10 @@ async function main() {
         await desktop.waitFor(JS.hydrated);
         const layout = await desktop.evaluate(`(() => {
           const main = document.querySelector('main');
-          const order = ['nav[aria-label="Breadcrumb"]', 'h1', '[data-privacy]', 'section[aria-label$="workspace"]', '#limitations', '#how-it-works', '#related']
+          const order = ['nav[aria-label="Breadcrumb"]', 'h1', '[data-privacy]', 'section[aria-label$="workspace"]', '#how-it-works', '#limitations', '#related']
             .map((s) => main.querySelector(s));
           if (order.some((el) => !el)) return "missing " + order.findIndex((el) => !el);
+          if (!order[3].querySelector('input, textarea, button')) return "the workspace rendered no controls";
           for (let i = 1; i < order.length; i += 1) {
             if (!(order[i - 1].compareDocumentPosition(order[i]) & Node.DOCUMENT_POSITION_FOLLOWING)) return "out of order at " + i;
           }
@@ -488,11 +490,53 @@ async function main() {
       assert(/doesn.t exist/i.test(await desktop.evaluate(JS.h1)), "custom 404 not rendered");
     });
 
+    await check("tool pages: title, description, canonical, Open Graph and structured data", async () => {
+      const problems = [];
+      for (const slug of TOOL_SLUGS) {
+        await desktop.goto(`${site}/tools/${slug}/`);
+        const head = await desktop.evaluate(`(() => {
+          const meta = (selector) => document.querySelector(selector)?.getAttribute("content") ?? "";
+          const ld = [...document.querySelectorAll('script[type="application/ld+json"]')].map((s) => JSON.parse(s.textContent));
+          return {
+            title: document.title,
+            h1: document.querySelector("h1")?.textContent ?? "",
+            description: meta('meta[name="description"]'),
+            canonical: document.querySelector('link[rel="canonical"]')?.href ?? "",
+            ogUrl: meta('meta[property="og:url"]'),
+            ogTitle: meta('meta[property="og:title"]'),
+            robots: meta('meta[name="robots"]'),
+            ld,
+          };
+        })()`);
+        // Canonical URLs are built for the deployed site, not the local test server.
+        const expected = `${configuredSite}/tools/${slug}/`;
+        if (!head.title.startsWith(`${head.h1} · `)) problems.push(`${slug}: title "${head.title}"`);
+        if (head.description.length < 40) problems.push(`${slug}: description "${head.description}"`);
+        if (head.canonical !== expected) problems.push(`${slug}: canonical ${head.canonical}`);
+        if (head.ogUrl !== expected) problems.push(`${slug}: og:url ${head.ogUrl}`);
+        if (!head.ogTitle.includes(head.h1)) problems.push(`${slug}: og:title ${head.ogTitle}`);
+        if (/noindex/.test(head.robots)) problems.push(`${slug}: noindex`);
+        const app = head.ld.find((entry) => entry["@type"] === "WebApplication");
+        if (!app || app.name !== head.h1 || app.url !== expected || app.offers?.price !== "0")
+          problems.push(`${slug}: structured data ${JSON.stringify(app)}`);
+      }
+      assert(problems.length === 0, problems.join("; "));
+      return `${TOOL_SLUGS.length} tool pages`;
+    });
+
     await check("sitemap and robots", async () => {
       const sitemap = await (await fetch(`${site}/sitemap.xml`)).text();
-      for (const slug of TOOL_SLUGS) assert(sitemap.includes(`/tools/${slug}/`), `sitemap lacks ${slug}`);
+      const urls = [...sitemap.matchAll(/<loc>([^<]+)<\/loc>/g)].map((match) => match[1]);
+      for (const slug of TOOL_SLUGS) assert(urls.includes(`${configuredSite}/tools/${slug}/`), `sitemap lacks ${slug}`);
+      assert(
+        urls.every((url) => url.startsWith(`${configuredSite}/`)),
+        "sitemap has a URL outside the site",
+      );
+      assert(new Set(urls).size === urls.length, "sitemap repeats a URL");
       const robots = await (await fetch(`${site}/robots.txt`)).text();
-      assert(robots.includes("sitemap.xml"), "robots.txt does not point to the sitemap");
+      assert(robots.includes(`Sitemap: ${configuredSite}/sitemap.xml`), "robots.txt does not point to the sitemap");
+      assert(/Allow: \//.test(robots) && !/Disallow: \/\s/.test(robots), "robots.txt blocks crawling");
+      return `${urls.length} URLs`;
     });
 
     /* ------------------------------------------------ search */
@@ -508,18 +552,18 @@ async function main() {
         await desktop.waitFor(JS.hydrated);
         assert(
           await desktop.waitFor(
-            `document.querySelector('main article h2')?.textContent.trim() === ${JSON.stringify(expected)}`,
+            `document.querySelector('main article h3')?.textContent.trim() === ${JSON.stringify(expected)}`,
           ),
-          `top result: ${await desktop.evaluate(`document.querySelector('main article h2')?.textContent`)}`,
+          `top result: ${await desktop.evaluate(`document.querySelector('main article h3')?.textContent`)}`,
         );
       });
     }
 
     await check("search for a tool that doesn't exist says so instead of guessing", async () => {
-      await desktop.goto(`${site}/tools/?q=convert%20csv%20json`);
+      await desktop.goto(`${site}/tools/?q=edit%20video%20timeline`);
       await desktop.waitFor(JS.hydrated);
       assert(
-        await desktop.waitFor(`document.body.innerText.includes("There isn't a tool for that yet")`),
+        await desktop.waitFor(`/There isn.t a tool for that yet/.test(document.body.innerText)`),
         "no honest empty state",
       );
       assert(
@@ -541,10 +585,144 @@ async function main() {
       await desktop.evaluate(JS.setValue('form[role="search"] input', "base64"));
       assert(
         await desktop.waitFor(
-          `document.querySelector('main article h2')?.textContent.trim() === "Base64 Encoder / Decoder"`,
+          `document.querySelector('main article h3')?.textContent.trim() === "Base64 Encoder / Decoder"`,
         ),
         "typing did not filter",
       );
+    });
+
+    await check("home finder: results as you type, arrows and Enter open a tool", async () => {
+      await desktop.goto(`${site}/`);
+      await desktop.waitFor(JS.hydrated);
+      await desktop.key("/", "Slash", 191);
+      assert(
+        await desktop.waitFor(`document.activeElement?.hasAttribute("data-primary-search")`),
+        "/ did not focus the home search",
+      );
+      await desktop.send("Input.insertText", { text: "jsno" });
+      assert(
+        await desktop.waitFor(
+          `document.querySelector('[role="combobox"][aria-expanded="true"]') && document.querySelector('[role="listbox"] [role="option"]')?.textContent.includes("JSON")`,
+        ),
+        "no typo-tolerant results for “jsno”",
+      );
+      await desktop.key("ArrowDown", "ArrowDown", 40);
+      const chosen = await desktop.evaluate(
+        `document.getElementById(document.activeElement.getAttribute("aria-activedescendant"))?.querySelector('.truncate')?.textContent`,
+      );
+      await desktop.key("Enter", "Enter", 13);
+      assert(
+        await desktop.waitFor(
+          `/\\/tools\\/[a-z0-9-]+\\/$/.test(location.pathname) && document.querySelector("h1")?.textContent === ${JSON.stringify(chosen)}`,
+        ),
+        "Enter did not open the highlighted tool",
+      );
+      const h1 = await desktop.evaluate(JS.h1);
+      assert(h1 === chosen, `opened “${h1}”, highlighted “${chosen}”`);
+      return `opened ${h1}`;
+    });
+
+    await check("command palette: Ctrl+K opens, searches, Esc closes, Enter opens a tool", async () => {
+      await desktop.goto(`${site}/about/`);
+      await desktop.waitFor(JS.hydrated);
+      const ctrlK = async () => {
+        for (const type of ["keyDown", "keyUp"])
+          await desktop.send("Input.dispatchKeyEvent", {
+            type,
+            key: "k",
+            code: "KeyK",
+            windowsVirtualKeyCode: 75,
+            modifiers: 2,
+          });
+      };
+      await ctrlK();
+      assert(await desktop.waitFor(`!!document.querySelector("dialog[open] [role=combobox]")`), "palette did not open");
+      assert(
+        await desktop.waitFor(`document.activeElement?.getAttribute("role") === "combobox"`),
+        "focus not in the palette",
+      );
+      assert(
+        await desktop.evaluate(`document.querySelector("dialog[open]").textContent.includes("Essential tools")`),
+        "empty palette does not suggest tools",
+      );
+      await desktop.send("Input.insertText", { text: "uuid" });
+      assert(
+        await desktop.waitFor(
+          `document.querySelector('dialog[open] [role="option"][aria-selected="true"]')?.textContent.includes("UUID Generator")`,
+        ),
+        "first result is not UUID Generator",
+      );
+      await desktop.key("Escape", "Escape", 27);
+      assert(await desktop.waitFor(`!document.querySelector("dialog[open]")`), "Escape did not close the palette");
+      await ctrlK();
+      assert(
+        await desktop.waitFor(`!!document.querySelector("dialog[open] [role=combobox]")`),
+        "palette did not reopen",
+      );
+      await desktop.send("Input.insertText", { text: "qr" });
+      await desktop.waitFor(`!!document.querySelector('dialog[open] [role="option"][aria-selected="true"]')`);
+      await desktop.key("Enter", "Enter", 13);
+      assert(
+        await desktop.waitFor(
+          `location.pathname.endsWith("/tools/qr-generator/") && !document.querySelector("dialog[open]")`,
+        ),
+        "Enter did not open the QR tool",
+      );
+      await assertCleanLoad(desktop, "palette");
+      assertSameOrigin(desktop, origin, "palette");
+    });
+
+    await check("tools directory: category and processing filters, kept in the address bar", async () => {
+      await desktop.goto(`${site}/tools/?category=image`);
+      await desktop.waitFor(JS.hydrated);
+      assert(
+        await desktop.waitFor(
+          `/^\\d+ tools? in Image\\.$/.test(document.querySelector('main [role="status"]')?.textContent ?? "") && document.querySelectorAll('main article').length > 0`,
+        ),
+        "category filter from the URL not applied",
+      );
+      const imageCount = await desktop.evaluate(`document.querySelectorAll('main article').length`);
+      await desktop.evaluate(JS.clickText("aside button", `Runs in your browser${imageCount}`));
+      assert(
+        await desktop.waitFor(`location.search.includes("processing=local")`),
+        "processing filter not reflected in the URL",
+      );
+      assert(
+        await desktop.evaluate(
+          `[...document.querySelectorAll('aside button')].find((b) => b.textContent.startsWith("Uses a network"))?.disabled`,
+        ),
+        "an empty filter option is not disabled",
+      );
+      return `${imageCount} image tools`;
+    });
+
+    await check("theme toggle switches between light and dark", async () => {
+      await desktop.goto(`${site}/`);
+      await desktop.waitFor(JS.hydrated);
+      const bg = () => desktop.evaluate(`getComputedStyle(document.body).backgroundColor`);
+      const before = await bg();
+      await desktop.evaluate(JS.click('header button[aria-label^="Switch to"]'));
+      await sleep(100);
+      const after = await bg();
+      assert(before !== after, `background stayed ${before}`);
+      const cls = await desktop.evaluate(`document.documentElement.className`);
+      assert(/\b(light|dark)\b/.test(cls), `no theme class on <html>: ${cls}`);
+      return `${before} → ${after}`;
+    });
+
+    await check("tools.json: the public catalogue lists every tool with links into this site", async () => {
+      const catalog = await (await fetch(`${site}/tools.json`)).json();
+      assert(catalog.version === 1, `version ${catalog.version}`);
+      for (const slug of TOOL_SLUGS)
+        assert(
+          catalog.tools.some((tool) => tool.slug === slug),
+          `missing ${slug}`,
+        );
+      assert(
+        catalog.tools.every((tool) => tool.url.startsWith(`${configuredSite}/tools/`)),
+        "a tool URL points outside the site",
+      );
+      return `${catalog.tools.length} tools`;
     });
 
     /* ------------------------------------------------ tools */
@@ -810,7 +988,9 @@ async function main() {
     await check("no-JS: /tools lists every tool as static HTML", async () => {
       await noJs.goto(`${site}/tools/`);
       const cards = await noJs.evaluate(`document.querySelectorAll('main article').length`);
-      assert(cards === TOOL_SLUGS.length, `${cards} cards`);
+      const stated = Number((await noJs.evaluate(JS.text)).match(/All (\d+) tools/)?.[1]);
+      assert(cards >= TOOL_SLUGS.length && cards === stated, `${cards} cards, page says ${stated}`);
+      return `${cards} tools`;
     });
     await check("no-JS: a tool page explains itself and says JavaScript is needed", async () => {
       await noJs.goto(`${site}/tools/image-compressor/`);

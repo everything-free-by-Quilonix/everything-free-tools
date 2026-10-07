@@ -1,11 +1,13 @@
 "use client";
 
-import { useDeferredValue, useMemo, useState } from "react";
+import { useDeferredValue, useMemo, useRef, useState } from "react";
 
 import { Panel } from "@/components/tool/panel";
 import { CopyButton } from "@/components/ui/actions";
+import { Announcer, useSettledValue } from "@/components/ui/announcer";
 import { Button } from "@/components/ui/button";
 import { Field, TextArea } from "@/components/ui/field";
+import { focusSoon } from "@/components/ui/focus";
 import { Notice, StatList } from "@/components/ui/states";
 import { countText, WORDS_PER_MINUTE } from "@/engines/text/count";
 import { formatBytes } from "@/lib/files";
@@ -14,6 +16,7 @@ const number = (value: number) => value.toLocaleString("en");
 
 export default function TextCounterWorkspace() {
   const [text, setText] = useState("");
+  const area = useRef<HTMLTextAreaElement>(null);
   // Counting follows typing without blocking it, even for long documents.
   const deferred = useDeferredValue(text);
   const stats = useMemo(() => countText(deferred), [deferred]);
@@ -21,6 +24,7 @@ export default function TextCounterWorkspace() {
   const summary = `${number(stats.words)} ${stats.words === 1 ? "word" : "words"}, ${number(stats.characters)} ${
     stats.characters === 1 ? "character" : "characters"
   }`;
+  const announced = useSettledValue(deferred ? summary : "", 1200);
 
   return (
     <div className="grid gap-4 lg:grid-cols-[3fr_2fr]">
@@ -28,6 +32,7 @@ export default function TextCounterWorkspace() {
         <Field label="Text to count" hideLabel hint="Type or paste. Counts update as you type.">
           {(context) => (
             <TextArea
+              ref={area}
               context={context}
               rows={14}
               value={text}
@@ -39,7 +44,14 @@ export default function TextCounterWorkspace() {
         {text ? (
           <div className="mt-3 flex gap-2">
             <CopyButton text={text} label="Copy text" />
-            <Button variant="ghost" size="sm" onClick={() => setText("")}>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setText("");
+                focusSoon(area);
+              }}
+            >
               Clear
             </Button>
           </div>
@@ -47,10 +59,8 @@ export default function TextCounterWorkspace() {
       </Panel>
 
       <Panel title="Counts">
-        {/* Announced politely and only as a short summary, so a screen reader isn't interrupted on every keystroke. */}
-        <p className="sr-only" role="status" aria-live="polite">
-          {deferred ? summary : ""}
-        </p>
+        {/* A short summary, announced once typing pauses, so a screen reader isn't interrupted on every keystroke. */}
+        <Announcer message={announced} />
         <StatList
           className="sm:grid-cols-2"
           items={[

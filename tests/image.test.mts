@@ -7,6 +7,8 @@ import {
   hasTransparentPixel,
   mayHaveTransparency,
   scaleDimensions,
+  STRIP_PIXELS,
+  stripRows,
 } from "@/engines/image/compress";
 import { checkFiles, derivedFileName, formatBytes, percentSaved, safeFileName } from "@/lib/files";
 
@@ -63,6 +65,28 @@ describe("File helpers", () => {
     assert.equal(derivedFileName("photo.final.JPG", "compressed", "jpg"), "photo.final-compressed.jpg");
     assert.equal(safeFileName(".."), "download");
     assert.equal(safeFileName('a<b>:"c|?*'), "a-b---c---");
+  });
+
+  it("strips characters that disguise a file name", () => {
+    // U+202E reverses the text after it: "invoice\u202Efdp.exe" displays as "invoiceexe.pdf".
+    assert.equal(derivedFileName("invoice\u202Egnp.exe.png", "compressed", "jpg"), "invoicegnp.exe-compressed.jpg");
+    assert.equal(safeFileName("a\u200bb\u2066c\ufeff.txt"), "abc.txt");
+    assert.equal(safeFileName(".hidden"), "hidden");
+    assert.equal(safeFileName("name. . "), "name");
+    assert.equal(safeFileName("\u0000\u0007"), "--");
+  });
+
+  it("shortens very long names but keeps the extension", () => {
+    const name = derivedFileName(`${"x".repeat(300)}.png`, "compressed", "webp");
+    assert.ok(name.length <= 120, `${name.length} characters`);
+    assert.match(name, /\.webp$/);
+  });
+
+  it("scans for transparency in strips of about a megapixel", () => {
+    assert.equal(stripRows(1024), 1024);
+    assert.equal(stripRows(6000), 174);
+    assert.equal(stripRows(3_000_000), 1);
+    assert.ok(stripRows(6000) * 6000 <= STRIP_PIXELS);
   });
 
   it("accepts by MIME type, with the extension as a fallback", () => {

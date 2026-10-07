@@ -130,10 +130,12 @@ function tokenize(text: string): Token[] {
       const match = NUMBER.exec(text);
       const end = match ? i + match[0].length : i;
       const after = text[end];
-      if (!match || match[0] === "-" || (after !== undefined && /[\d.eE+\-]/.test(after))) {
-        const bad = text.slice(i).match(/^[-+\d.eE]+/)?.[0] ?? text[i] ?? "";
+      // A number followed directly by more number-like characters or letters ("01", "1.2.3", "0x10", "12px") is one bad token.
+      if (!match || match[0] === "-" || (after !== undefined && /[\w.+\-]/.test(after))) {
+        const bad = text.slice(i).match(/^[-+\w.]+/)?.[0] ?? text[i] ?? "";
         let hint = "";
-        if (/^-?0\d/.test(bad)) hint = " Numbers can't have leading zeros.";
+        if (/^-?0[xX]/.test(bad)) hint = " JSON numbers can't be hexadecimal.";
+        else if (/^-?0\d/.test(bad)) hint = " Numbers can't have leading zeros.";
         else if (/\.$|\.[eE]/.test(bad)) hint = " A decimal point must be followed by digits.";
         throw new JsonSyntaxError(`“${bad}” is not a valid JSON number.${hint}`, i);
       }
@@ -157,11 +159,16 @@ function tokenize(text: string): Token[] {
     if (char === 0xfeff) throw new JsonSyntaxError("Unexpected byte order mark.", i);
     const word = text.slice(i).match(/^[A-Za-z_$][\w$]*/)?.[0];
     if (word) {
+      const near = LITERALS.find(
+        (literal) => literal !== word && (literal.startsWith(word) || word.startsWith(literal)),
+      );
       const hint = /^(True|False|Null|TRUE|FALSE|NULL)$/.test(word)
         ? ` JSON literals are lowercase: ${word.toLowerCase()}.`
         : /^(undefined|NaN|Infinity)$/.test(word)
           ? ` ${word} is not a JSON value.`
-          : " Keys and text values need double quotes.";
+          : near
+            ? ` Did you mean ${near}?`
+            : " Keys and text values need double quotes.";
       throw new JsonSyntaxError(`Unexpected “${word}”.${hint}`, i);
     }
     throw new JsonSyntaxError(`Unexpected ${describeChar(text, i)}.`, i);

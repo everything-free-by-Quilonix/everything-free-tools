@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { escapeWifiValue, looksLikeBareDomain, wifiPayload } from "@/engines/qr/payload";
-import { colourWarning, contrastRatio, createMatrix, modulesPath, QUIET_ZONE, svgMarkup } from "@/engines/qr/render";
+import { colourWarning, contrastRatio, createMatrix, QUIET_ZONE, svgMarkup } from "@/engines/qr/render";
 import { ToolError } from "@/lib/errors";
 
 describe("QR payloads", () => {
@@ -58,13 +58,15 @@ describe("QR rendering", () => {
     );
   });
 
-  it("emits an SVG with only numbers and validated colours", () => {
-    const matrix = createMatrix("hi", "L");
-    const svg = svgMarkup(matrix, "#000000", "#FFFFFF");
-    assert.match(svg, /^<svg xmlns="http:\/\/www.w3.org\/2000\/svg"/);
-    assert.ok(svg.includes('fill="#ffffff"'));
-    assert.match(modulesPath(matrix), /^(M\d+ \d+h\d+v1h-\d+z)+$/);
-    assert.throws(() => svgMarkup(matrix, 'red" onload="x', "#ffffff"), ToolError);
+  it("normalises colour case in the SVG", () => {
+    assert.ok(svgMarkup(createMatrix("hi", "L"), "#000000", "#FFFFFF").includes('fill="#ffffff"'));
+  });
+
+  it("explains a broken character (lone surrogate) instead of crashing", () => {
+    assert.throws(
+      () => createMatrix("abc \ud83d def", "M"),
+      (error: unknown) => error instanceof ToolError && /broken character/.test(error.message),
+    );
   });
 
   it("warns about low contrast and inverted colours", () => {
@@ -72,5 +74,57 @@ describe("QR rendering", () => {
     assert.equal(colourWarning("#000000", "#ffffff"), null);
     assert.match(colourWarning("#ffffff", "#000000") ?? "", /inverted/i);
     assert.match(colourWarning("#777777", "#999999") ?? "", /low contrast/i);
+  });
+});
+
+describe("QR SVG security", () => {
+  // The whole file, as it may be: shapes, numbers and #rrggbb colours, nothing else.
+  const STRICT_SVG =
+    /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" viewBox="0 0 (\d+) \1" width="\d+" height="\d+" shape-rendering="crispEdges"><rect width="\1" height="\1" fill="#[0-9a-f]{6}"\/><path d="(?:M\d+ \d+h\d+v1h-\d+z)*" fill="#[0-9a-f]{6}"\/><\/svg>$/;
+
+  const HOSTILE = [
+    "<svg onload=alert(1)>",
+    "<script>alert(document.cookie)</script>",
+    "<img src=x onerror=alert(1)>",
+    '"><foreignObject><iframe src=javascript:alert(1)>',
+    "' onmouseover='alert(1)",
+    "&amp; &lt; &#x3C; &#60; <![CDATA[ ]]> <!-- -->",
+    "javascript:alert(1)",
+    "ನಮಸ್ಕಾರ 😀 \u202e\u0000",
+  ];
+
+  it("contains no trace of the encoded content, whatever it is", () => {
+    for (const payload of HOSTILE) {
+      const svg = svgMarkup(createMatrix(payload, "M"), "#000000", "#ffffff");
+      assert.match(svg, STRICT_SVG, payload);
+      assert.ok(!/[<>"'&]/.test(svg.replace(/^<svg[^>]*>|<rect[^>]*\/>|<path[^>]*\/>|<\/svg>$/g, "")), payload);
+    }
+  });
+
+  it("keeps Wi-Fi details out of the markup", () => {
+    const payload = wifiPayload({
+      ssid: '<svg onload=x>";',
+      password: "<script>x</script>",
+      security: "WPA",
+      hidden: false,
+    });
+    assert.match(svgMarkup(createMatrix(payload, "Q"), "#112233", "#fafafa"), STRICT_SVG);
+  });
+
+  it("refuses colours that could carry markup", () => {
+    const matrix = createMatrix("x", "L");
+    for (const colour of ['#000000" onload="alert(1)', "red", "url(javascript:x)", "#00000", "#0000000", "#gggggg"]) {
+      assert.throws(() => svgMarkup(matrix, colour, "#ffffff"), ToolError, colour);
+      assert.throws(() => svgMarkup(matrix, "#000000", colour), ToolError, colour);
+    }
+  });
+
+  it("is deterministic: the same input gives byte-identical output", () => {
+    for (const payload of ["https://example.com", HOSTILE[2]!, "ನ"]) {
+      assert.equal(
+        svgMarkup(createMatrix(payload, "H"), "#000000", "#ffffff"),
+        svgMarkup(createMatrix(payload, "H"), "#000000", "#ffffff"),
+      );
+    }
   });
 });

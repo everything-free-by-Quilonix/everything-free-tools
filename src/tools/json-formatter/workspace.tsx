@@ -4,8 +4,11 @@ import { useRef, useState } from "react";
 
 import { Panel } from "@/components/tool/panel";
 import { CopyButton, DownloadLink } from "@/components/ui/actions";
+import { Announcer } from "@/components/ui/announcer";
 import { Button } from "@/components/ui/button";
 import { Field, Segmented, TextArea } from "@/components/ui/field";
+import { focusSoon } from "@/components/ui/focus";
+import { OutputText } from "@/components/ui/output-text";
 import { EmptyState, ErrorState, Notice, ProgressBar } from "@/components/ui/states";
 import type { Indent, JsonMode, JsonResult, JsonTaskInput } from "@/engines/data/json";
 import { MIME, textBlob } from "@/lib/downloads";
@@ -19,19 +22,20 @@ const modeLabels: Record<JsonMode, string> = { format: "Format", minify: "Minify
 interface Outcome {
   mode: JsonMode;
   result: JsonResult;
+  /** Made with the result, so an older run can never supply the download. */
+  blob: Blob | null;
 }
 
 export default function JsonFormatterWorkspace() {
   const [text, setText] = useState("");
   const [mode, setMode] = useState<JsonMode>("format");
   const [indent, setIndent] = useState<Indent>(2);
-  const [output, setOutput] = useState<Blob | null>(null);
   const input = useRef<HTMLTextAreaElement>(null);
+  const submit = useRef<HTMLButtonElement>(null);
   const task = useTask<Outcome>();
 
   const run = (nextMode = mode, nextIndent = indent) => {
     const payload: JsonTaskInput = { text, mode: nextMode, indent: nextIndent };
-    setOutput(null);
     void task.run(async ({ signal }) => {
       const result = await runTask<JsonTaskInput, JsonResult>({
         input: payload,
@@ -39,25 +43,38 @@ export default function JsonFormatterWorkspace() {
         fallback: () => import("@/engines/data/json").then((engine) => engine.runJson),
         signal,
       });
-      if (result.ok && nextMode !== "validate") setOutput(textBlob(result.output, MIME.json));
-      return { mode: nextMode, result };
+      const blob = result.ok && nextMode !== "validate" ? textBlob(result.output, MIME.json) : null;
+      return { mode: nextMode, result, blob };
     });
   };
 
   const goToError = (offset: number) => {
     const area = input.current;
     if (!area) return;
+    // Offsets are counted after a leading byte order mark, which the parser skips.
+    const start = offset + (area.value.charCodeAt(0) === 0xfeff ? 1 : 0);
     area.focus();
-    area.setSelectionRange(offset, Math.min(offset + 1, area.value.length));
+    area.setSelectionRange(start, Math.min(start + 1, area.value.length));
   };
 
   const state = task.state;
   const done = state.status === "done" ? state.output : null;
   const failure = done && !done.result.ok ? done.result.error : null;
   const success = done && done.result.ok ? { mode: done.mode, result: done.result } : null;
+  const output = done?.blob ?? null;
+
+  const announcement =
+    state.status === "running"
+      ? "Working…"
+      : success
+        ? success.mode === "validate"
+          ? "Valid JSON."
+          : `Valid JSON. The ${success.mode === "minify" ? "minified" : "formatted"} output is ready.`
+        : "";
 
   return (
     <div className="grid gap-4 lg:grid-cols-2">
+      <Announcer message={announcement} />
       <Panel title="Your JSON">
         <form
           className="space-y-4"
@@ -83,7 +100,7 @@ export default function JsonFormatterWorkspace() {
                 autoCorrect="off"
                 wrap="off"
                 placeholder='{"hello": "world"}'
-                className="font-mono text-[13px]"
+                className="font-mono"
                 onChange={(event) => setText(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
@@ -118,7 +135,7 @@ export default function JsonFormatterWorkspace() {
             ) : null}
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button type="submit" disabled={!text.trim() || state.status === "running"}>
+            <Button ref={submit} type="submit" disabled={!text.trim() || state.status === "running"}>
               {modeLabels[mode]} JSON
             </Button>
             <Button variant="ghost" onClick={() => setText(SAMPLE)}>
@@ -129,8 +146,9 @@ export default function JsonFormatterWorkspace() {
                 variant="ghost"
                 onClick={() => {
                   setText("");
-                  setOutput(null);
                   task.reset();
+                  // This button disappears with the text; keep focus in the tool.
+                  focusSoon(input);
                 }}
               >
                 Clear
@@ -160,7 +178,14 @@ export default function JsonFormatterWorkspace() {
         {state.status === "running" ? (
           <div className="space-y-3">
             <ProgressBar value={null} label="Working…" />
-            <Button variant="secondary" size="sm" onClick={task.cancel}>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => {
+                task.cancel();
+                focusSoon(submit);
+              }}
+            >
               Cancel
             </Button>
           </div>
@@ -169,8 +194,8 @@ export default function JsonFormatterWorkspace() {
         {state.status === "error" ? <ErrorState error={state.error} /> : null}
 
         {failure ? (
-          <div className="space-y-3" role="alert">
-            <Notice tone="danger" title={`Line ${failure.line}, column ${failure.column}`}>
+          <div className="space-y-3">
+            <Notice tone="danger" role="alert" title={`Line ${failure.line}, column ${failure.column}`}>
               {failure.message}
             </Notice>
             <Button variant="secondary" size="sm" onClick={() => goToError(failure.offset)}>
@@ -181,26 +206,12 @@ export default function JsonFormatterWorkspace() {
 
         {success ? (
           <div className="space-y-3">
-            <Notice tone="success" role="status" title="Valid JSON">
+            <Notice tone="success" title="Valid JSON">
               {success.result.stats.values.toLocaleString("en")} values,{" "}
               {success.result.stats.keys.toLocaleString("en")} keys, nested {success.result.stats.depth} deep. Numbers
               and strings are kept exactly as written.
             </Notice>
-            {success.mode !== "validate" ? (
-              <Field label="Output" hideLabel>
-                {(context) => (
-                  <TextArea
-                    context={context}
-                    readOnly
-                    rows={14}
-                    wrap="off"
-                    spellCheck={false}
-                    value={success.result.output}
-                    className="font-mono text-[13px]"
-                  />
-                )}
-              </Field>
-            ) : null}
+            {success.mode !== "validate" ? <OutputText value={success.result.output} rows={14} wrap="off" /> : null}
           </div>
         ) : null}
       </Panel>

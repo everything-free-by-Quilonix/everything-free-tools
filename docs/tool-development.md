@@ -34,10 +34,18 @@ Create `src/tools/<slug>/workspace.tsx` (a default-exported client component) an
 
 Every workspace shows exactly one of: nothing yet, working (cancellable if slow), error, or result. Downloads are object URLs (`DownloadLink` revokes them), named with `derivedFileName` so an original is never overwritten.
 
+Also:
+
+- Put one `Announcer` in the workspace and give it the outcome in one sentence ("Valid JSON. The formatted output is ready."). Don't put `role="status"` on panels that appear with the result; use `role="alert"` only for errors.
+- Show long text results with `OutputText`, which caps what is displayed and keeps Copy and Download complete.
+- If a button removes itself when pressed (Clear, Cancel, Remove), move focus back into the tool with `focusSoon`.
+- Anything that finishes asynchronously must check that it is still the latest request before updating the screen (`useTask` does this; see the image and Base64 workspaces for hand-rolled versions).
+
 ## 4. Tests
 
 - Unit tests for the engine in `tests/<name>.test.mts`, including the failure cases.
-- Add a behaviour check to `scripts/browser-smoke.mjs` that uses the tool in Chrome and checks the result, and add the route to the route list so it gets the load, CSP, axe and overflow checks.
+- Add a behaviour check to `scripts/browser-smoke.mjs` that uses the tool in Chrome and checks the result, and add the route to the route list so it gets the load, CSP, axe, metadata and overflow checks.
+- Add the tool to `scripts/cross-browser.mjs` too, with anything engine-specific it relies on (file APIs, canvas, clipboard, downloads), so it is exercised in Chromium, Firefox and WebKit.
 - If the tool has a heavy engine, add its marker to `ENGINES` in `scripts/check-bundle.mjs` so no other page can load it.
 
-Then run `npm run verify:static && npm run test:browser`.
+Then run `npm run verify:static && npm run test:browser && npm run test:cross-browser`.

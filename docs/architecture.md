@@ -4,7 +4,7 @@ Everything.Free Tools is a statically exported Next.js application. There is no 
 
 ```
 src/
-  app/                 Routes (all static): home, /tools, /tools/[tool], /categories/[category], about, privacy, accessibility
+  app/                 Routes (all static): home, /tools, /tools/[tool], /categories, /categories/[category], about, privacy, accessibility
   tools/
     registry/          The tool model: types, 15 categories, definitions, validation
     <slug>/workspace.tsx  Each tool's interactive UI
@@ -12,8 +12,10 @@ src/
     use-task.ts        Cancellable task state for workspaces
   engines/             Pure processing code, no React: data/json, data/base64, text/count, crypto/uuid, image/compress, qr/*
   workers/             Worker protocol, page-side runner, and one entry file per worker
-  components/          ui/ (buttons, fields, states, actions), tool/ (page shell, privacy notice, cards, search, dropzone), layout/
-  lib/                 privacy wording, search, capabilities, errors, files, downloads, seo
+  components/          ui/ (buttons, fields, states, actions, breadcrumbs, kbd), tool/ (page shell, privacy notice, cards, directory, dropzone),
+                       search/ (home finder, command palette), layout/ (header, footer, theme)
+  config/              site, deployment, navigation, discovery (the only curated lists)
+  lib/                 privacy and processing wording, search, tool summaries, capabilities, errors, files, downloads, seo
 scripts/               build-static, CSP, privacy check, bundle check, browser smoke test
 tests/                 Unit tests (*.test.mts)
 ```
@@ -45,22 +47,46 @@ Heavier work runs in a Web Worker ([protocol](../src/workers/protocol.ts)):
 
 Today the JSON formatter and image compressor use workers. The text counter, UUID, Base64 and QR tools are fast enough to run on the page.
 
+The image worker needs `OffscreenCanvas` to draw off the page. Without it (Safari before 16.4, and Playwright's WebKit build on Windows), the same engine runs on the page. It yields between images and between transparency-scan strips, but drawing and encoding one very large image is a single browser task: a 24-megapixel PNG paused the page for about 2.4 s in that WebKit build, against under 70 ms with a worker in Chromium and Firefox. A cancel is handled when that task ends; the image in progress may still finish, and nothing after it runs.
+
+Memory: a decoded image costs 4 bytes per pixel. The engine holds one decoded bitmap and one canvas, releases the bitmap as soon as it is drawn, checks transparency in strips of about 1 megapixel instead of copying the whole image again, and shrinks the canvas to zero once the output exists. Result and thumbnail object URLs are revoked when a result is removed (the cross-browser test counts live URLs).
+
 ## Bundles
 
 Each workspace is loaded with `next/dynamic` from [`workspaces.tsx`](../src/tools/workspaces.tsx), so a tool page downloads only its own UI. Engines imported only by a worker or a lazy fallback are not downloaded until the tool runs. `npm run check:bundle` enforces this: it fails if a page loads another tool's engine up front, and reports each page's JavaScript size against a budget.
 
-Measured on the current build (gzipped, excluding legacy `noModule` polyfills): about 137 kB on content pages, which is the Next.js and React runtime, and 146–152 kB on tool pages. The QR page includes `uqr`; no other page loads a tool engine up front.
+Measured on the current build (gzipped, excluding legacy `noModule` polyfills): about 137 kB on content pages, which is the Next.js and React runtime, and 146–152 kB on tool pages. The QR page includes `uqr`; no other page loads a tool engine up front. The JSON page ships no JSON engine at all until Format is pressed (it arrives in the worker), and the image page ships neither the image engine nor `uqr`.
+
+Result text is capped at 100,000 characters on screen ([`OutputText`](../src/components/ui/output-text.tsx)); Copy and Download use the full text. Laying out a 4.8-million-character result took 3.3 s in Chromium, against 0.25 s to produce it.
 
 ## Static export and security headers
 
-`npm run build:static` runs `next build` with `output: "export"` (which fails if any route needs a server), then [`scripts/csp.mjs`](../scripts/csp.mjs) writes a Content Security Policy meta tag into every page, because GitHub Pages can't send headers. Scripts are allowed by SHA-256 hash only; `connect-src 'self'` stops the page contacting any other host; `worker-src 'self'`, `frame-src 'none'`, `object-src 'none'`. Headers that only work as HTTP headers (`frame-ancestors`, `X-Frame-Options`) are not available on GitHub Pages.
+`npm run build:static` runs `next build` with `output: "export"` (which fails if any route needs a server), then [`scripts/csp.mjs`](../scripts/csp.mjs) writes a Content Security Policy meta tag into every page, because GitHub Pages can't send headers. Scripts are allowed by SHA-256 hash only; styles only from stylesheets; `connect-src 'self'` stops the page contacting any other host; `worker-src 'self'`, `frame-src 'none'`, `object-src 'none'`. There is no `'unsafe-inline'` or `'unsafe-eval'`, and the build fails if a page's policy is ever loosened. `upgrade-insecure-requests` is deliberately absent: every source is `'self'`, `data:` or `blob:`, so it could never upgrade anything on the HTTPS site, and WebKit applies it to `http://localhost`, which made local testing impossible. Header-only protections (`frame-ancestors`, `X-Frame-Options`) aren't available on GitHub Pages; see [SECURITY.md](../SECURITY.md#limitation-github-pages-and-http-headers).
+
+There are no API routes, route handlers other than the statically generated `sitemap.xml` and `robots.txt`, server actions, middleware, runtime environment variables or database. `NEXT_PUBLIC_SITE_URL` is optional and read at build time. The build fetches the Inter and Manrope fonts once (through `next/font`) and serves them from the site; nothing is fetched from another origin at runtime.
 
 ## Accessibility
 
-Native controls with visible labels (`Field` wires `label`, `aria-describedby` and `aria-invalid`); segmented choices are radio groups; file inputs always have a button; results and errors use `role="status"`/`role="alert"`; one focus style for everything; a skip link; reduced motion respected; zoom never disabled. The browser test runs axe-core (WCAG 2.1 A/AA, serious and critical) on every page and on tool results, and checks for horizontal overflow at 390 and 320 px. Automated checks are not a conformance claim; manual testing with assistive technology hasn't been done yet.
+Native controls with visible labels (`Field` wires `label`, `aria-describedby` and `aria-invalid`); segmented choices are radio groups; file inputs always have a button; one focus style for everything; a skip link; reduced motion respected; zoom never disabled; form text is 16 px on small screens so iOS doesn't zoom on focus.
+
+Dynamic results are announced through one persistent polite live region per tool ([`Announcer`](../src/components/ui/announcer.tsx)), because a live region inserted together with its text is announced inconsistently by screen readers. The visible result panels carry no live role of their own, so nothing is read twice. Errors use `role="alert"`. The word counter announces only after typing pauses. Buttons that remove themselves (Clear, Cancel, Remove all, remove one image) move focus back into the tool instead of dropping it on the page body. There are no dialogs.
+
+The browser tests run axe-core (WCAG 2.1 A/AA, serious and critical) on every page and on tool results, walk the focus order of a tool page in three engines checking that every stop has a visible indicator, and check for horizontal overflow at 320 to 412 px in both orientations. Automated checks are not a conformance claim; testing with real screen readers hasn't been done yet.
+
+## Theming
+
+Dark is the only theme. Every component colour is a semantic token (`bg`, `surface`, `fg`, `accent`, status colours), and a `.light` token set exists, so a light theme is mostly a token swap. Not yet done: the viewport `themeColor` and `colorScheme` are fixed to dark in `app/layout.tsx`; the light tokens haven't been contrast-checked with axe; there is no switch. A remembered preference would need storage, which the privacy page rules out, so a light theme should follow `prefers-color-scheme` instead. The `--slate` token is defined but unused.
 
 ## Dependencies
 
-Runtime: `next` 16.3.6 (MIT), `react` / `react-dom` 19.2.8 (MIT), `uqr` 0.1.3 (MIT, no dependencies; QR encoding). Development only: TypeScript, ESLint 9 with `eslint-config-next`, Prettier, Tailwind CSS 4, and `axe-core` 4.13.0 (MPL-2.0) for the browser test. All versions are pinned exactly.
+| Package                     | Licence | Purpose                                         | Browser alternative?                                                                  | Where it loads                                                    |
+| --------------------------- | ------- | ----------------------------------------------- | ------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| `next` 16.3.6               | MIT     | Static site generation, routing, code splitting | —                                                                                     | Every page (runtime ~137 kB gz with React)                        |
+| `react`, `react-dom` 19.2.8 | MIT     | UI                                              | —                                                                                     | Every page                                                        |
+| `uqr` 0.1.3                 | MIT     | QR encoding (Reed–Solomon, masking, versions)   | None: where browsers have `BarcodeDetector` it only reads codes, it can't create them | QR page only: one chunk of 10.6 kB gz, including the QR workspace |
 
-ESLint 9 is used although npm flags it as deprecated, because `eslint-config-next`'s plugins don't yet declare support for ESLint 10.
+`uqr` has no dependencies, is maintained under the UnJS organisation (0.1.3 was published on 3 April 2026) and does one thing. It was chosen over `qrcode` (several dependencies) and `qrcode-generator` (larger). Everything else a tool needs (Base64, UUIDs, text segmentation, image decoding and encoding, JSON parsing) is either a browser API or code in this repository.
+
+Development only, never shipped: TypeScript, ESLint 9 with `eslint-config-next`, Prettier, Tailwind CSS 4, `axe-core` 4.13.0 (MPL-2.0, accessibility checks) and `playwright` 1.63.0 (Apache-2.0, cross-browser tests). All versions are pinned exactly; `npm audit` reports no known vulnerabilities.
+
+ESLint 9 stays although npm flags it as deprecated: `eslint-plugin-react` 7.37.5, `eslint-plugin-import` 2.32.0 and `eslint-plugin-jsx-a11y` 6.10.2, all required by `eslint-config-next`, still declare ESLint 9 as their newest supported version.

@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { HydrationMarker } from "@/components/layout/hydration-marker";
 import { SiteFooter } from "@/components/layout/site-footer";
 import { SiteHeader, SkipLink } from "@/components/layout/site-header";
+import { SearchHost } from "@/components/search/search-host";
 import { site, siteUrl } from "@/config/site";
 
 import "./globals.css";
@@ -27,8 +28,11 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   // Zoom is never restricted (WCAG 1.4.4).
-  themeColor: "#0a0a0f",
-  colorScheme: "dark",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#fbfaf7" },
+    { media: "(prefers-color-scheme: dark)", color: "#0b0b0e" },
+  ],
+  colorScheme: "dark light",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
@@ -41,6 +45,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
           {children}
         </main>
         <SiteFooter />
+        <SearchHost />
         <HydrationMarker />
       </body>
     </html>

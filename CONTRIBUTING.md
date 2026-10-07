@@ -14,7 +14,7 @@ Thanks for helping. This project has a few firm rules, because the tools are onl
 
 1. Open an issue first for a new tool, so we can agree on scope.
 2. Branch from `main`, make the change, and follow [docs/tool-development.md](docs/tool-development.md) for tools.
-3. Run `npm run verify:static` and `npm run test:browser`.
+3. Run `npm run verify:static`, `npm run test:browser` and, for UI or file-handling changes, `npm run test:cross-browser` (after `npx playwright install chromium firefox webkit`).
 4. Open a pull request using the template. CI must pass.
 
 ## Style

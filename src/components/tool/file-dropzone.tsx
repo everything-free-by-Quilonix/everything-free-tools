@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useRef, useState, type DragEvent } from "react";
+import { useId, useRef, useState, type DragEvent, type RefObject } from "react";
 
 import { Icon } from "@/components/icons";
 import { buttonClasses } from "@/components/ui/button";
@@ -20,6 +20,7 @@ export function FileDropzone({
   label,
   hint,
   disabled,
+  inputRef,
 }: {
   accept: readonly string[];
   multiple?: boolean;
@@ -27,9 +28,12 @@ export function FileDropzone({
   label: string;
   hint?: string;
   disabled?: boolean;
+  /** For moving focus here, e.g. after the files it listed are removed. */
+  inputRef?: RefObject<HTMLInputElement | null>;
 }) {
   const id = useId();
-  const input = useRef<HTMLInputElement>(null);
+  const ownRef = useRef<HTMLInputElement>(null);
+  const input = inputRef ?? ownRef;
   const [over, setOver] = useState(false);
 
   const take = (list: FileList | null) => {

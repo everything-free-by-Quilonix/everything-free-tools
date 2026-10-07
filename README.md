@@ -8,16 +8,30 @@ Live site (once deployed): <https://everything-free-by-quilonix.github.io/everyt
 
 ## Tools
 
-| Tool                     | Category     | Processing | Notes                                                                  |
-| ------------------------ | ------------ | ---------- | ---------------------------------------------------------------------- |
-| JSON Formatter           | Developer    | Local      | Strict parser; never alters numbers or strings; line/column errors     |
-| Word & Character Counter | Text         | Local      | Grapheme-aware counts via `Intl.Segmenter`                             |
-| UUID Generator           | Developer    | Local      | v4 and v7, Web Crypto only                                             |
-| Base64 Encoder / Decoder | Developer    | Local      | UTF-8, URL-safe, strict decoding, file in and out                      |
-| Image Compressor         | Image        | Local      | Worker + OffscreenCanvas, keeps transparency, applies EXIF orientation |
-| QR Code Generator        | QR & Barcode | Local      | Text/link and Wi-Fi, PNG and SVG                                       |
+43 tools, all processed locally. The six launch tools are below; the [/tools/ directory](https://everything-free-by-quilonix.github.io/everything-free-tools/tools/) lists the rest. Everything is local: what you type or choose stays in your browser tab. The site's Content Security Policy makes the browser refuse any request to another host, and the browser tests confirm that using every tool makes no such request.
+
+| Tool                     | Category     | Notes                                                                                                |
+| ------------------------ | ------------ | ---------------------------------------------------------------------------------------------------- |
+| JSON Formatter           | Developer    | Strict parser; changes only whitespace, so numbers and strings are never altered; line/column errors |
+| Word & Character Counter | Text         | Grapheme-aware counts via `Intl.Segmenter`, with a fallback                                          |
+| UUID Generator           | Developer    | v4 and v7, from Web Crypto only                                                                      |
+| Base64 Encoder / Decoder | Developer    | UTF-8, URL-safe, strict decoding, file in and out                                                    |
+| Image Compressor         | Image        | Keeps transparency, applies EXIF orientation, runs in a worker where the browser allows              |
+| QR Code Generator        | QR & Barcode | Text/link and Wi-Fi, PNG and SVG                                                                     |
 
 Every tool is described once, as data, in [`src/tools/registry/definitions.ts`](src/tools/registry/definitions.ts). Pages, search, categories, the sitemap and privacy labels are all generated from that entry.
+
+Find a tool from the home page search, the `/tools/` directory (search plus category, processing and format filters, kept in the URL), category pages, or from anywhere with Ctrl+K / ?K (or `/`). The site follows your system light/dark setting; the header toggle overrides it for the visit.
+
+## Browser validation
+
+Tested automatically on every CI run, against the static export:
+
+- **Chromium, Firefox and WebKit** (Playwright builds): every tool end to end, file chooser, drag and drop, clipboard, downloads checked byte for byte, workers and their fallbacks, CSP attacks, keyboard focus, zero requests to other origins.
+- **Chrome** (CDP smoke test): every route, axe-core accessibility checks, 390 and 320 px layouts, JavaScript disabled.
+- **Emulated phones**: Pixel 7 (Chromium), iPhone 13 and iPhone SE (WebKit).
+
+Not yet tested: Apple's Safari itself (the WebKit build is close but not identical), physical Android and iOS devices, and screen readers. Details and measured results: [docs/browser-support.md](docs/browser-support.md).
 
 ## Development
 
@@ -28,16 +42,17 @@ npm ci
 npm run dev             # http://localhost:3000/everything-free-tools
 ```
 
-| Command                 | What it does                                                           |
-| ----------------------- | ---------------------------------------------------------------------- |
-| `npm test`              | Unit tests (Node's built-in runner, against the TypeScript source)     |
-| `npm run lint`          | ESLint, including bans on `eval`, `new Function` and raw HTML          |
-| `npm run typecheck`     | TypeScript, strict                                                     |
-| `npm run check:privacy` | Fails on network, storage, eval or `Math.random` in engines            |
-| `npm run build:static`  | Static export to `out/`, with a hash-based CSP written into every page |
-| `npm run check:bundle`  | Per-page JavaScript sizes; fails if a page loads another tool's engine |
-| `npm run test:browser`  | Real-Chrome test of the export: every tool, workers, CSP, a11y, mobile |
-| `npm run verify:static` | Everything above except the browser test                               |
+| Command                      | What it does                                                                        |
+| ---------------------------- | ----------------------------------------------------------------------------------- |
+| `npm test`                   | Unit tests (Node's built-in runner, against the TypeScript source)                  |
+| `npm run lint`               | ESLint, including bans on `eval`, `new Function` and raw HTML                       |
+| `npm run typecheck`          | TypeScript, strict                                                                  |
+| `npm run check:privacy`      | Fails on network, storage, eval or `Math.random` in engines                         |
+| `npm run build:static`       | Static export to `out/`, with a verified hash-based CSP written into every page     |
+| `npm run check:bundle`       | Per-page JavaScript sizes; fails if a page loads another tool's engine              |
+| `npm run test:browser`       | Chrome test of the export: routes, tools, workers, CSP, accessibility, mobile       |
+| `npm run test:cross-browser` | Chromium, Firefox and WebKit, plus phone emulation (`npx playwright install` first) |
+| `npm run verify:static`      | Everything above except the two browser tests                                       |
 
 ## Documentation
 
